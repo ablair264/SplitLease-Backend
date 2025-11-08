@@ -301,6 +301,16 @@ app.post('/api/upload', (req, res, next) => {
       }));
 
       const validVehicles = normalized.filter((v) => v.manufacturer && v.model && v.monthly_rental);
+      console.log('Upload parsing summary:', {
+        totalParsed: vehicleData.length,
+        sample: (normalized[0] ? {
+          manufacturer: normalized[0].manufacturer,
+          model: normalized[0].model,
+          monthly_rental: normalized[0].monthly_rental,
+          term_months: normalized[0].term_months,
+          annual_mileage: normalized[0].annual_mileage,
+        } : null)
+      })
       const result = await leaseDB.processVehicleData(session.sessionId, validVehicles);
 
       // Update session total rows
