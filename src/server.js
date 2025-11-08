@@ -153,6 +153,27 @@ app.get('/api/dashboard/stats', async (req, res) => {
   }
 })
 
+// Dashboard feeds
+app.get('/api/dashboard/activity', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10
+    const result = await leaseDB.getRecentUploads(limit)
+    res.json(result)
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+app.get('/api/dashboard/top-offers', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10
+    const result = await leaseDB.getTopOffers(limit)
+    res.json(result)
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 app.get('/api/filters', async (req, res) => {
   try {
     const [manufacturers, fuelTypes] = await Promise.all([

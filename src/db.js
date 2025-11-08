@@ -388,6 +388,41 @@ class LeaseAnalysisDB {
     }
   }
 
+  // ===================== DASHBOARD FEEDS =====================
+  async getRecentUploads(limit = 10) {
+    try {
+      const q = await this.query(
+        `SELECT us.id, us.filename, us.status, us.processed_rows, us.total_rows, us.created_at,
+                COALESCE(p.display_name, p.name) AS provider_name
+           FROM upload_sessions us
+           LEFT JOIN providers p ON p.id = us.provider_id
+          ORDER BY us.created_at DESC
+          LIMIT $1`,
+        [limit]
+      )
+      return { success: true, data: q.rows }
+    } catch (e) {
+      console.error('Error fetching recent uploads:', e)
+      return { success: false, error: e.message, data: [] }
+    }
+  }
+
+  async getTopOffers(limit = 10) {
+    try {
+      const q = await this.query(
+        `SELECT manufacturer, model, best_monthly_rental, best_provider_name, best_deal_score
+           FROM best_deals_cache
+          ORDER BY best_deal_score DESC NULLS LAST, best_monthly_rental ASC
+          LIMIT $1`,
+        [limit]
+      )
+      return { success: true, data: q.rows }
+    } catch (e) {
+      console.error('Error fetching top offers:', e)
+      return { success: false, error: e.message, data: [] }
+    }
+  }
+
   async searchVehicles(query, limit = 20) {
     try {
       const result = await this.query(
