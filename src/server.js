@@ -129,13 +129,27 @@ app.get('/api/vehicle/:id/offers', async (req, res) => {
 // =============================================
 app.get('/api/dashboard/stats', async (req, res) => {
   try {
-    const stats = await leaseDB.getMarketStats();
-    const providers = await leaseDB.getProviderPerformance();
-    res.json({ success: true, marketStats: stats.data, providerStats: providers.data });
+    const [stats, providers] = await Promise.allSettled([
+      leaseDB.getMarketStats(),
+      leaseDB.getProviderPerformance(),
+    ])
+    const response = {
+      success: true,
+      marketStats: stats.status === 'fulfilled' ? (stats.value?.data || null) : null,
+      providerStats: providers.status === 'fulfilled' ? (providers.value?.data || []) : [],
+    }
+    if (stats.status === 'rejected' || providers.status === 'rejected') {
+      response.partial = true
+      response.errors = {
+        market: stats.status === 'rejected' ? (stats.reason?.message || 'failed') : undefined,
+        providers: providers.status === 'rejected' ? (providers.reason?.message || 'failed') : undefined,
+      }
+    }
+    res.json(response)
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: error.message })
   }
-});
+})
 
 app.get('/api/filters', async (req, res) => {
   try {
