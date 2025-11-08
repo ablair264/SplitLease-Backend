@@ -15,16 +15,18 @@ const allowList = corsEnv.split(',').map((s) => s.trim()).filter(Boolean)
 const wildcardToRegex = (pattern) =>
   new RegExp('^' + pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$')
 const allowRegexes = allowList.map((p) => wildcardToRegex(p))
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      if (!origin) return cb(null, true) // same-origin or curl
-      if (allowList.includes('*')) return cb(null, true)
-      const ok = allowRegexes.some((rx) => rx.test(origin))
-      return cb(ok ? null : new Error('CORS not allowed'), ok)
-    },
-  })
-)
+const corsHandler = cors({
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true) // same-origin or curl
+    if (allowList.includes('*')) return cb(null, true)
+    const ok = allowRegexes.some((rx) => rx.test(origin))
+    return cb(ok ? null : new Error('CORS not allowed'), ok)
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+})
+app.use(corsHandler)
+app.options('*', corsHandler)
 app.use(express.json());
 
 // Use in-memory uploads for platform portability (Railway, Cloud Run, etc.)
