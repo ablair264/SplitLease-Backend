@@ -30,8 +30,17 @@ app.use(express.json());
 // Use in-memory uploads for platform portability (Railway, Cloud Run, etc.)
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
 });
+
+// Basic request logger
+app.use((req, res, next) => {
+  console.log(
+    `[${new Date().toISOString()}] ${req.method} ${req.url} ` +
+      `(ct=${req.headers['content-type'] || '-'} len=${req.headers['content-length'] || '-'})`
+  )
+  next()
+})
 
 // Root + Health
 app.get('/', (req, res) => {
@@ -137,7 +146,11 @@ app.get('/api/search', async (req, res) => {
 // =============================================
 // UPLOADS
 // =============================================
-app.post('/api/upload', upload.single('file'), async (req, res) => {
+// Pre-handler to log before multer processes
+app.post('/api/upload', (req, res, next) => {
+  console.log('Starting upload handler...')
+  next()
+}, upload.single('file'), async (req, res) => {
   try {
     const file = req.file;
     const providerName = req.body.providerName;
@@ -146,6 +159,13 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     if (!file || !providerName) {
       return res.status(400).json({ success: false, error: 'File and provider name are required' });
     }
+
+    console.log('Upload received:', {
+      providerName,
+      fileName: file.originalname,
+      size: file.size,
+      mimetype: file.mimetype,
+    })
 
     const session = await leaseDB.createUploadSession(
       providerName,
@@ -235,7 +255,10 @@ app.post('/api/refresh-cache', async (req, res) => {
 
 // Error handler
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  console.error('Unhandled error:', err && err.stack ? err.stack : err)
+  if (err && err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ success: false, error: 'File too large' })
+  }
   res.status(500).json({ success: false, error: 'Internal server error' });
 });
 
