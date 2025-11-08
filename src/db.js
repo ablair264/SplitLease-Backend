@@ -348,6 +348,23 @@ class LeaseAnalysisDB {
     }
   }
 
+  // ===================== STATUS =====================
+  async getUploadStatus(sessionId) {
+    try {
+      const q = await this.query(
+        `SELECT id, provider_id, filename, file_format, total_rows, processed_rows, status,
+                processing_started_at, processing_completed_at, error_message
+           FROM upload_sessions
+          WHERE id = $1`,
+        [sessionId]
+      )
+      if (q.rows.length === 0) return { success: false, error: 'not_found' }
+      return { success: true, data: q.rows[0] }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  }
+
   // ===================== UTILITIES =====================
   async getManufacturers() {
     try {

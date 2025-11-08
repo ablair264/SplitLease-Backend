@@ -386,6 +386,19 @@ app.post('/api/refresh-cache', async (req, res) => {
   }
 });
 
+// Upload status polling
+app.get('/api/upload/:id/status', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id)
+    if (!id) return res.status(400).json({ success: false, error: 'invalid id' })
+    const result = await leaseDB.getUploadStatus(id)
+    if (!result.success) return res.status(404).json(result)
+    res.json(result)
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // Error handler
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err && err.stack ? err.stack : err)
