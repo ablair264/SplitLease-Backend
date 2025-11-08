@@ -9,9 +9,22 @@ const { leaseDB } = require('./db');
 
 const app = express();
 
-// CORS: allow all by default; set CORS_ORIGIN to restrict
-const corsOrigin = process.env.CORS_ORIGIN || '*';
-app.use(cors({ origin: corsOrigin }));
+// CORS: allow all by default; set CORS_ORIGIN to restrict (comma-separated, supports * wildcards)
+const corsEnv = process.env.CORS_ORIGIN || '*'
+const allowList = corsEnv.split(',').map((s) => s.trim()).filter(Boolean)
+const wildcardToRegex = (pattern) =>
+  new RegExp('^' + pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$')
+const allowRegexes = allowList.map((p) => wildcardToRegex(p))
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true) // same-origin or curl
+      if (allowList.includes('*')) return cb(null, true)
+      const ok = allowRegexes.some((rx) => rx.test(origin))
+      return cb(ok ? null : new Error('CORS not allowed'), ok)
+    },
+  })
+)
 app.use(express.json());
 
 // Use in-memory uploads for platform portability (Railway, Cloud Run, etc.)
@@ -229,4 +242,3 @@ app.listen(PORT, () => {
 });
 
 module.exports = app;
-
