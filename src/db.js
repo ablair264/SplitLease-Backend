@@ -365,6 +365,57 @@ class LeaseAnalysisDB {
     }
   }
 
+  // ===================== MAPPINGS =====================
+  async saveMapping(providerName, columnMappings, headerNames) {
+    try {
+      const result = await this.query(
+        `INSERT INTO provider_mappings (provider_name, column_mappings, header_names)
+           VALUES (lower($1), $2, $3)
+           ON CONFLICT (provider_name)
+           DO UPDATE SET column_mappings = EXCLUDED.column_mappings,
+                         header_names = EXCLUDED.header_names,
+                         updated_at = CURRENT_TIMESTAMP
+         RETURNING id, provider_name, column_mappings, header_names, updated_at`,
+        [providerName, columnMappings, headerNames || null]
+      )
+      return { success: true, data: result.rows[0] }
+    } catch (e) {
+      console.error('Error saving mapping:', e)
+      return { success: false, error: e.message }
+    }
+  }
+
+  async getMappings(limit = 50) {
+    try {
+      const q = await this.query(
+        `SELECT id, provider_name, column_mappings, header_names, updated_at
+           FROM provider_mappings
+          ORDER BY updated_at DESC
+          LIMIT $1`,
+        [limit]
+      )
+      return { success: true, data: q.rows }
+    } catch (e) {
+      return { success: false, error: e.message, data: [] }
+    }
+  }
+
+  async getMappingByProvider(providerName) {
+    try {
+      const q = await this.query(
+        `SELECT id, provider_name, column_mappings, header_names, updated_at
+           FROM provider_mappings
+          WHERE provider_name = lower($1)
+          LIMIT 1`,
+        [providerName]
+      )
+      if (q.rows.length === 0) return { success: false, error: 'not_found' }
+      return { success: true, data: q.rows[0] }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  }
+
   // ===================== UTILITIES =====================
   async getManufacturers() {
     try {

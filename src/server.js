@@ -422,6 +422,35 @@ app.get('/api/upload/:id/status', async (req, res) => {
   }
 })
 
+// Save/load provider mappings
+app.get('/api/mappings', async (req, res) => {
+  try {
+    const provider = req.query.provider
+    if (provider) {
+      const r = await leaseDB.getMappingByProvider(provider)
+      return res.json(r)
+    }
+    const limit = parseInt(req.query.limit) || 50
+    const r = await leaseDB.getMappings(limit)
+    res.json(r)
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+app.post('/api/mappings', async (req, res) => {
+  try {
+    const { providerName, fieldMappings, headerNames } = req.body || {}
+    if (!providerName || !fieldMappings) {
+      return res.status(400).json({ success: false, error: 'providerName and fieldMappings required' })
+    }
+    const r = await leaseDB.saveMapping(providerName, fieldMappings, headerNames)
+    res.json(r)
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // Error handler
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err && err.stack ? err.stack : err)
