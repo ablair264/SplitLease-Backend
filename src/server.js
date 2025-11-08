@@ -228,6 +228,10 @@ app.post('/api/upload', (req, res, next) => {
       });
     } else {
       // CSV buffer parse with stable header order; prefer client-provided headerNames
+      // Sniff delimiter (default comma; some EU sheets use semicolon)
+      const headSample = file.buffer.slice(0, 2048).toString('utf8')
+      const firstLine = headSample.split(/\r?\n/)[0] || ''
+      const sep = (firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length ? ';' : ','
       vehicleData = await new Promise((resolve, reject) => {
         const results = [];
         const readable = new Readable();
@@ -235,7 +239,7 @@ app.post('/api/upload', (req, res, next) => {
         readable.push(null);
         let headerOrder = null;
         readable
-          .pipe(csv())
+          .pipe(csv({ separator: sep, mapHeaders: ({ header }) => (header || '').trim() }))
           .on('headers', (headers) => {
             headerOrder = headers;
           })
