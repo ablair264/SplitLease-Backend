@@ -329,27 +329,47 @@ app.post('/api/upload', (req, res, next) => {
           annual_mileage: normalized[0].annual_mileage,
         } : null)
       })
-      const result = await leaseDB.processVehicleData(session.sessionId, validVehicles);
 
-      // Update session total rows
+      // Update session total rows now
       try {
-        await leaseDB.query('UPDATE upload_sessions SET total_rows = $1 WHERE id = $2', [vehicleData.length, session.sessionId])
+        await leaseDB.query('UPDATE upload_sessions SET total_rows = $1, status = $2 WHERE id = $3', [vehicleData.length, 'processing', session.sessionId])
       } catch (e) {
         console.warn('Could not update total_rows for session', session.sessionId, e.message)
       }
 
-      // Refresh best deals cache in background
-      leaseDB.refreshBestDeals().catch(console.error);
-
+      // Respond immediately; continue processing in background to avoid timeouts
       res.json({
         success: true,
         sessionId: session.sessionId,
         totalRows: vehicleData.length,
         validRows: validVehicles.length,
-        processed: result.processed,
-        errors: result.errors,
-        errorDetails: result.errorDetails,
+        processed: 0,
+        errors: 0,
+        note: 'Processing in background'
       });
+
+      // Background chunked processing
+      const chunkSize = Number(process.env.UPLOAD_CHUNK_SIZE || 500);
+      let processed = 0;
+      let totalErrors = 0;
+      for (let i = 0; i < validVehicles.length; i += chunkSize) {
+        const chunk = validVehicles.slice(i, i + chunkSize);
+        const result = await leaseDB.processVehicleDataChunk(session.sessionId, chunk);
+        processed += result.processed || 0;
+        totalErrors += result.errors || 0;
+        try {
+          await leaseDB.query('UPDATE upload_sessions SET processed_rows = $1 WHERE id = $2', [processed, session.sessionId]);
+        } catch (e) {
+          console.warn('Could not update processed_rows mid-way:', e.message)
+        }
+      }
+      try {
+        await leaseDB.query('UPDATE upload_sessions SET processed_rows = $1, status = $2, processing_completed_at = CURRENT_TIMESTAMP WHERE id = $3', [processed, 'completed', session.sessionId]);
+      } catch (e) {
+        console.warn('Could not finalize upload session:', e.message)
+      }
+      // Refresh best deals in background at end
+      leaseDB.refreshBestDeals().catch(console.error);
     }
   } catch (error) {
     console.error('Upload error:', error);

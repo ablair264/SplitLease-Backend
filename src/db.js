@@ -270,6 +270,74 @@ class LeaseAnalysisDB {
     }
   }
 
+  // Process a chunk of vehicle data without touching upload_sessions status
+  async processVehicleDataChunk(sessionId, vehicleData) {
+    const client = await this.pool.connect();
+    let processedCount = 0;
+    let errorCount = 0;
+    const errors = [];
+
+    try {
+      await client.query('BEGIN');
+
+      for (const vehicle of vehicleData) {
+        try {
+          await client.query('SAVEPOINT sp_row');
+          await client.query(
+            `SELECT insert_lease_offer(
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+              $15, $16, $17, $18, $19, $20, $21, $22
+            )`,
+            [
+              vehicle.provider_name,
+              sessionId,
+              // Required identifiers
+              vehicle.manufacturer,
+              vehicle.model,
+              vehicle.monthly_rental,
+              vehicle.term_months || 36,
+              vehicle.annual_mileage || 10000,
+              // Optional identifiers/details
+              vehicle.cap_code || null,
+              vehicle.variant || null,
+              vehicle.p11d_price || null,
+              // Vehicle details
+              vehicle.fuel_type || null,
+              vehicle.mpg || null,
+              vehicle.co2_emissions || null,
+              vehicle.electric_range || null,
+              vehicle.insurance_group || null,
+              vehicle.body_style || null,
+              vehicle.transmission || null,
+              // Lease terms optional
+              vehicle.upfront_payment || 0,
+              vehicle.maintenance_included || false,
+              vehicle.admin_fee || 0,
+              vehicle.offer_valid_until || null,
+              vehicle.special_conditions || null,
+            ]
+          );
+          await client.query('RELEASE SAVEPOINT sp_row');
+          processedCount++;
+        } catch (error) {
+          errorCount++;
+          try { await client.query('ROLLBACK TO SAVEPOINT sp_row'); } catch (_) {}
+          errors.push({ vehicle: `${vehicle.manufacturer} ${vehicle.model}`, error: error.message });
+          console.error(`Error processing vehicle ${vehicle.manufacturer} ${vehicle.model}:`, error);
+        }
+      }
+
+      await client.query('COMMIT');
+      return { success: true, processed: processedCount, errors: errorCount, errorDetails: errors.slice(0, 5) };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Chunk transaction error:', error);
+      return { success: false, error: error.message, processed: processedCount, errors: errorCount + 1 };
+    } finally {
+      client.release();
+    }
+  }
+
   async refreshBestDeals() {
     try {
       const result = await this.query('SELECT refresh_all_best_deals()');
