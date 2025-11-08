@@ -47,13 +47,38 @@ app.get('/', (req, res) => {
   res.status(200).send('OK')
 })
 app.get('/health', async (req, res) => {
+  const debug = req.query && (req.query.debug === '1' || req.query.debug === 'true')
   try {
-    await leaseDB.query('SELECT 1');
-    res.json({ ok: true });
+    await leaseDB.query('SELECT 1')
+    const resp = { ok: true }
+    if (debug) {
+      const info = { usingConnectionString: !!process.env.DATABASE_URL }
+      try {
+        if (process.env.DATABASE_URL) {
+          const u = new URL(process.env.DATABASE_URL)
+          info.connectionHost = u.hostname
+          info.connectionPort = u.port
+          info.connectionDatabase = (u.pathname || '').replace(/^\//, '')
+          info.connectionUser = u.username ? `${u.username.substring(0, 4)}***` : undefined
+        } else {
+          info.host = process.env.DB_HOST
+          info.port = process.env.DB_PORT
+          info.database = process.env.DB_NAME
+          info.user = process.env.DB_USER ? `${process.env.DB_USER.substring(0, 4)}***` : undefined
+          info.pgsslmode = process.env.PGSSLMODE
+        }
+      } catch (e) {
+        info.parseError = e.message
+      }
+      resp.info = info
+    }
+    res.json(resp)
   } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
+    const errorResp = { ok: false, error: e.message }
+    if (debug) errorResp.stack = e.stack
+    res.status(500).json(errorResp)
   }
-});
+})
 
 // =============================================
 // BEST DEALS
@@ -196,20 +221,25 @@ app.post('/api/upload', (req, res, next) => {
         return vehicle;
       });
     } else {
-      // CSV buffer parse
+      // CSV buffer parse with stable header order
       vehicleData = await new Promise((resolve, reject) => {
         const results = [];
         const readable = new Readable();
         readable.push(file.buffer);
         readable.push(null);
+        let headerOrder = null;
         readable
           .pipe(csv())
+          .on('headers', (headers) => {
+            headerOrder = headers;
+          })
           .on('data', (row) => {
             const vehicle = { provider_name: providerName };
             Object.entries(fieldMappings).forEach(([field, index]) => {
-              const header = Object.keys(row)[index];
-              if (header && row[header] !== undefined) {
-                vehicle[field] = row[header];
+              const i = typeof index === 'string' ? parseInt(index) : index;
+              const headerName = Array.isArray(headerOrder) && i >= 0 ? headerOrder[i] : null;
+              if (headerName && row[headerName] !== undefined) {
+                vehicle[field] = row[headerName];
               }
             });
             results.push(vehicle);
@@ -224,6 +254,13 @@ app.post('/api/upload', (req, res, next) => {
     async function processAndRespond() {
       const validVehicles = vehicleData.filter((v) => v.manufacturer && v.model && v.monthly_rental);
       const result = await leaseDB.processVehicleData(session.sessionId, validVehicles);
+
+      // Update session total rows
+      try {
+        await leaseDB.query('UPDATE upload_sessions SET total_rows = $1 WHERE id = $2', [vehicleData.length, session.sessionId])
+      } catch (e) {
+        console.warn('Could not update total_rows for session', session.sessionId, e.message)
+      }
 
       // Refresh best deals cache in background
       leaseDB.refreshBestDeals().catch(console.error);

@@ -13,6 +13,12 @@ class LeaseAnalysisDB {
         idleTimeoutMillis: 30000,
         connectionTimeoutMillis: 2000,
       });
+      try {
+        const u = new URL(connectionString)
+        console.log('DB: using connection string host=%s port=%s db=%s ssl=%s', u.hostname, u.port || '(default)', (u.pathname || '').replace(/^\//, ''), useSSL)
+      } catch (e) {
+        console.warn('DB: invalid DATABASE_URL (parse failed): %s', e.message)
+      }
     } else {
       this.pool = new Pool({
         user: config.user || process.env.DB_USER || 'postgres',
@@ -25,6 +31,13 @@ class LeaseAnalysisDB {
         connectionTimeoutMillis: 2000,
         ssl: useSSL ? { rejectUnauthorized: false } : undefined,
       });
+      console.log(
+        'DB: using discrete config host=%s port=%s db=%s ssl=%s',
+        process.env.DB_HOST || 'localhost',
+        process.env.DB_PORT || 5432,
+        process.env.DB_NAME || 'lease_analysis',
+        useSSL
+      )
     }
   }
 
