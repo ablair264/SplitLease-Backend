@@ -180,6 +180,12 @@ app.post('/api/upload', (req, res, next) => {
     const file = req.file;
     const providerName = req.body.providerName;
     const fieldMappings = JSON.parse(req.body.fieldMappings || '{}');
+    let headerNames = [];
+    try {
+      headerNames = JSON.parse(req.body.headerNames || '[]')
+    } catch (e) {
+      headerNames = []
+    }
 
     if (!file || !providerName) {
       return res.status(400).json({ success: false, error: 'File and provider name are required' });
@@ -221,7 +227,7 @@ app.post('/api/upload', (req, res, next) => {
         return vehicle;
       });
     } else {
-      // CSV buffer parse with stable header order
+      // CSV buffer parse with stable header order; prefer client-provided headerNames
       vehicleData = await new Promise((resolve, reject) => {
         const results = [];
         const readable = new Readable();
@@ -237,7 +243,9 @@ app.post('/api/upload', (req, res, next) => {
             const vehicle = { provider_name: providerName };
             Object.entries(fieldMappings).forEach(([field, index]) => {
               const i = typeof index === 'string' ? parseInt(index) : index;
-              const headerName = Array.isArray(headerOrder) && i >= 0 ? headerOrder[i] : null;
+              const headerName = Array.isArray(headerNames) && headerNames.length > 0
+                ? headerNames[i]
+                : (Array.isArray(headerOrder) && i >= 0 ? headerOrder[i] : null);
               if (headerName && row[headerName] !== undefined) {
                 vehicle[field] = row[headerName];
               }
@@ -252,7 +260,47 @@ app.post('/api/upload', (req, res, next) => {
     await processAndRespond();
 
     async function processAndRespond() {
-      const validVehicles = vehicleData.filter((v) => v.manufacturer && v.model && v.monthly_rental);
+      // Normalize and coerce values before filtering
+      const parseNumber = (val) => {
+        if (val === undefined || val === null) return null;
+        if (typeof val === 'number') return val;
+        const s = String(val).replace(/[^0-9.+-]/g, '');
+        if (!s) return null;
+        const num = s.includes('.') ? parseFloat(s) : parseInt(s, 10);
+        return isNaN(num) ? null : num;
+      };
+      const toBool = (val) => {
+        if (typeof val === 'boolean') return val;
+        if (val === null || val === undefined) return false;
+        const s = String(val).trim().toLowerCase();
+        return s === 'true' || s === 'yes' || s === 'y' || s === '1';
+      };
+
+      const normalized = vehicleData.map((v) => ({
+        provider_name: providerName,
+        cap_code: v.cap_code ?? v.capCode ?? null,
+        manufacturer: v.manufacturer,
+        model: v.model,
+        variant: v.variant ?? null,
+        p11d_price: parseNumber(v.p11d_price ?? v.p11d),
+        fuel_type: v.fuel_type ?? v.fuelType ?? null,
+        mpg: parseNumber(v.mpg),
+        co2_emissions: parseNumber(v.co2_emissions ?? v.co2),
+        electric_range: parseNumber(v.electric_range),
+        insurance_group: parseNumber(v.insurance_group),
+        body_style: v.body_style ?? null,
+        transmission: v.transmission ?? null,
+        monthly_rental: parseNumber(v.monthly_rental),
+        upfront_payment: parseNumber(v.upfront_payment ?? v.upfront) || 0,
+        term_months: parseNumber(v.term_months ?? v.term) || 36,
+        annual_mileage: parseNumber(v.annual_mileage ?? v.mileage) || 10000,
+        maintenance_included: toBool(v.maintenance_included ?? v.maintenance),
+        admin_fee: parseNumber(v.admin_fee) || 0,
+        offer_valid_until: v.offer_valid_until ?? null,
+        special_conditions: v.special_conditions ?? null,
+      }));
+
+      const validVehicles = normalized.filter((v) => v.manufacturer && v.model && v.monthly_rental);
       const result = await leaseDB.processVehicleData(session.sessionId, validVehicles);
 
       // Update session total rows
