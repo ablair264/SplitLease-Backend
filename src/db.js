@@ -4,14 +4,28 @@ class LeaseAnalysisDB {
   constructor(config = {}) {
     const connectionString = config.connectionString || process.env.DATABASE_URL;
     const useSSL = process.env.PGSSLMODE === 'require' || process.env.NODE_ENV === 'production';
+    const poolMax = Number(process.env.DB_POOL_MAX || 10);
+    const connectTimeout = Number(process.env.DB_CONNECT_TIMEOUT_MS || 10000);
+    const keepAlive = true;
+    const keepAliveDelay = Number(process.env.DB_KEEPALIVE_DELAY_MS || 15000);
+
+    const parsePort = () => {
+      const raw = config.port ?? process.env.DB_PORT;
+      if (!raw) return 5432;
+      const m = String(raw).match(/\d+/);
+      const n = m ? Number(m[0]) : NaN;
+      return Number.isFinite(n) ? n : 5432;
+    };
 
     if (connectionString) {
       this.pool = new Pool({
         connectionString,
         ssl: useSSL ? { rejectUnauthorized: false } : undefined,
-        max: 20,
+        max: poolMax,
         idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 2000,
+        connectionTimeoutMillis: connectTimeout,
+        keepAlive,
+        keepAliveInitialDelayMillis: keepAliveDelay,
       });
       try {
         const u = new URL(connectionString)
@@ -25,16 +39,18 @@ class LeaseAnalysisDB {
         host: config.host || process.env.DB_HOST || 'localhost',
         database: config.database || process.env.DB_NAME || 'lease_analysis',
         password: config.password || process.env.DB_PASSWORD || 'password',
-        port: config.port || (process.env.DB_PORT ? Number(process.env.DB_PORT) : 5432),
-        max: 20,
+        port: parsePort(),
+        max: poolMax,
         idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 2000,
+        connectionTimeoutMillis: connectTimeout,
         ssl: useSSL ? { rejectUnauthorized: false } : undefined,
+        keepAlive,
+        keepAliveInitialDelayMillis: keepAliveDelay,
       });
       console.log(
         'DB: using discrete config host=%s port=%s db=%s ssl=%s',
         process.env.DB_HOST || 'localhost',
-        process.env.DB_PORT || 5432,
+        parsePort(),
         process.env.DB_NAME || 'lease_analysis',
         useSSL
       )
