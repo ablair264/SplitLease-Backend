@@ -33,7 +33,10 @@ const upload = multer({
   limits: { fileSize: 25 * 1024 * 1024 }, // 25MB
 });
 
-// Health
+// Root + Health
+app.get('/', (req, res) => {
+  res.status(200).send('OK')
+})
 app.get('/health', async (req, res) => {
   try {
     await leaseDB.query('SELECT 1');
@@ -237,8 +240,15 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
+const HOST = process.env.HOST || '0.0.0.0';
+app.listen(PORT, HOST, () => {
   console.log(`Lease Analysis API server running on port ${PORT}`);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received: closing server');
+  leaseDB.close().then(() => process.exit(0)).catch(() => process.exit(0));
 });
 
 module.exports = app;
