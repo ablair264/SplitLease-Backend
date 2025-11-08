@@ -166,6 +166,7 @@ class LeaseAnalysisDB {
 
       for (const vehicle of vehicleData) {
         try {
+          await client.query('SAVEPOINT sp_row');
           await client.query(
             `SELECT insert_lease_offer(
               $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
@@ -200,9 +201,12 @@ class LeaseAnalysisDB {
               vehicle.special_conditions || null,
             ]
           );
+          await client.query('RELEASE SAVEPOINT sp_row');
           processedCount++;
         } catch (error) {
           errorCount++;
+          // Roll back only the current row so we can continue
+          try { await client.query('ROLLBACK TO SAVEPOINT sp_row'); } catch (_) {}
           errors.push({
             vehicle: `${vehicle.manufacturer} ${vehicle.model}`,
             error: error.message,
