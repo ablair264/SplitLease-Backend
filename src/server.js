@@ -174,6 +174,59 @@ app.get('/api/dashboard/top-offers', async (req, res) => {
   }
 })
 
+// =============================================
+// SALARY SACRIFICE
+// =============================================
+app.get('/api/ss/customers', async (req, res) => {
+  try {
+    const { search = '', sort = 'orders_desc', limit = '100', offset = '0' } = req.query
+    const result = await leaseDB.listSSCustomers({ search, sort, limit: parseInt(limit), offset: parseInt(offset) })
+    res.json(result)
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+app.post('/api/ss/customers', async (req, res) => {
+  try {
+    const payload = req.body || {}
+    const r = await leaseDB.createSSCustomer(payload)
+    res.json(r)
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+app.get('/api/ss/enquiries', async (req, res) => {
+  try {
+    const { search = '', limit = '100', offset = '0' } = req.query
+    const result = await leaseDB.listSSEnquiries({ search, limit: parseInt(limit), offset: parseInt(offset) })
+    res.json(result)
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+app.post('/api/ss/enquiries', async (req, res) => {
+  try {
+    const payload = req.body || {}
+    const r = await leaseDB.createSSEnquiry(payload)
+    res.json(r)
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+app.get('/api/ss/enquiries/report', async (req, res) => {
+  try {
+    const { salesperson } = req.query
+    const r = await leaseDB.reportSSEnquiriesBySalesperson(salesperson)
+    res.json(r)
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 app.get('/api/filters', async (req, res) => {
   try {
     const [manufacturers, fuelTypes] = await Promise.all([
