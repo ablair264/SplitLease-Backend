@@ -474,6 +474,117 @@ class LeaseAnalysisDB {
     }
   }
 
+  // ===================== SALARY SACRIFICE =====================
+  async listSSCustomers({ search = '', sort = 'orders_desc', limit = 100, offset = 0 } = {}) {
+    try {
+      const where = []
+      const params = []
+      if (search) {
+        params.push(`%${search.toLowerCase()}%`)
+        params.push(`%${search.toLowerCase()}%`)
+        where.push(`(lower(name) LIKE $${params.length - 1} OR lower(email) LIKE $${params.length})`)
+      }
+      let order = 'vehicles_ordered DESC'
+      if (sort === 'orders_asc') order = 'vehicles_ordered ASC'
+      if (sort === 'newest') order = 'created_at DESC'
+      if (sort === 'oldest') order = 'created_at ASC'
+
+      params.push(limit); params.push(offset)
+      const q = await this.query(
+        `SELECT id, name, region, email, phone, vehicles_ordered, created_at
+           FROM ss_customers
+          ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+          ORDER BY ${order}
+          LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        params
+      )
+
+      const m = await this.query('SELECT COUNT(*) AS live_customers, COALESCE(SUM(vehicles_ordered),0) AS vehicles_ordered FROM ss_customers')
+      const metrics = {
+        live_customers: Number(m.rows[0]?.live_customers || 0),
+        vehicles_ordered: Number(m.rows[0]?.vehicles_ordered || 0),
+        vehicles_delivered: 0,
+      }
+      return { success: true, data: q.rows, metrics }
+    } catch (e) {
+      console.error('SS customers list error:', e)
+      return { success: false, error: e.message, data: [], metrics: { live_customers: 0, vehicles_ordered: 0, vehicles_delivered: 0 } }
+    }
+  }
+
+  async listSSEnquiries({ search = '', limit = 100, offset = 0 } = {}) {
+    try {
+      const params = []
+      let where = ''
+      if (search) {
+        params.push(`%${search.toLowerCase()}%`)
+        params.push(`%${search.toLowerCase()}%`)
+        params.push(`%${search.toLowerCase()}%`)
+        where = `WHERE lower(customer_name) LIKE $1 OR lower(customer_email) LIKE $2 OR lower(customer_phone) LIKE $3`
+      }
+      params.push(limit); params.push(offset)
+      const q = await this.query(
+        `SELECT id, customer_name, customer_email AS email, customer_phone AS phone, salesperson, referrer, status, created_at
+           FROM ss_enquiries
+          ${where}
+          ORDER BY created_at DESC
+          LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        params
+      )
+      return { success: true, data: q.rows }
+    } catch (e) {
+      console.error('SS enquiries list error:', e)
+      return { success: false, error: e.message, data: [] }
+    }
+  }
+
+  async createSSEnquiry(payload) {
+    try {
+      const r = await this.query(
+        `INSERT INTO ss_enquiries (
+          customer_id, customer_name, customer_address, customer_phone, customer_email,
+          primary_contact_name, primary_contact_phone, primary_contact_email,
+          salesperson, referrer, status, notes
+        ) VALUES (
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
+        ) RETURNING id`,
+        [
+          payload.customer_id || null,
+          payload.customerName,
+          payload.customerAddress || null,
+          payload.customerPhone || null,
+          payload.customerEmail || null,
+          payload.primaryName || null,
+          payload.primaryPhone || null,
+          payload.primaryEmail || null,
+          payload.salesperson || null,
+          payload.referrer || null,
+          payload.status || 'Draft',
+          payload.notes || null,
+        ]
+      )
+      return { success: true, id: r.rows[0].id }
+    } catch (e) {
+      console.error('SS create enquiry error:', e)
+      return { success: false, error: e.message }
+    }
+  }
+
+  async reportSSEnquiriesBySalesperson(salesperson) {
+    try {
+      const q = await this.query(
+        `SELECT customer_name, salesperson, referrer, status, notes, created_at
+           FROM ss_enquiries
+          WHERE salesperson = $1
+          ORDER BY created_at DESC`,
+        [salesperson]
+      )
+      return { success: true, data: q.rows }
+    } catch (e) {
+      return { success: false, error: e.message, data: [] }
+    }
+  }
+
   async searchVehicles(query, limit = 20) {
     try {
       const result = await this.query(
