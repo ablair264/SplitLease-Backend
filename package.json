@@ -8,7 +8,8 @@
     "start": "node src/server.js",
     "worker": "node src/drivaliaWorker.js",
     "dev": "node src/server.js",
-    "dev:worker": "node src/drivaliaWorker.js"
+    "dev:worker": "node src/drivaliaWorker.js",
+    "import:drivalia": "node src/importDrivaliaVehicles.js"
   },
   "engines": {
     "node": ">=18"

@@ -124,17 +124,40 @@ class DrivaliaWorker {
       const allQuotes = [];
 
       for (const vehicle of job.vehicles) {
-        console.log(`   📍 Processing: ${vehicle.manufacturer} ${vehicle.model} ${vehicle.variant}`);
+        console.log(`   📍 Processing: ${vehicle.manufacturer} ${vehicle.model}`);
 
         try {
+          // First, we need to get the vehicle object with Drivalia codes
+          let drivaliaVehicle;
+
+          if (vehicle.drivalia_xref_code && vehicle.drivalia_make_code) {
+            // Vehicle has Drivalia codes - use them directly
+            console.log(`      ℹ️  Using stored Drivalia codes (xref: ${vehicle.drivalia_xref_code})`);
+            drivaliaVehicle = {
+              xrefCode: vehicle.drivalia_xref_code,
+              name: vehicle.variant,
+              makeCode: vehicle.drivalia_make_code,
+              modelCode: vehicle.drivalia_model_code,
+              variantCode: vehicle.drivalia_variant_code,
+              p11d: vehicle.p11d_price,
+              co2: vehicle.co2_emissions
+            };
+          } else {
+            // No Drivalia codes - need to look up vehicle
+            console.log(`      🔍 Looking up vehicle in Drivalia catalog...`);
+            drivaliaVehicle = await this.drivaliaAPI.findVariant(
+              vehicle.manufacturer,
+              vehicle.model,
+              vehicle.variant
+            );
+          }
+
           // Get quotes for all term/mileage combinations
           for (const term of terms) {
             for (const mileage of mileages) {
               try {
                 const quoteResult = await this.drivaliaAPI.calculateQuote({
-                  make: vehicle.manufacturer,
-                  model: vehicle.model,
-                  variant: vehicle.variant,
+                  vehicle: drivaliaVehicle,
                   term: term,
                   annualMileage: mileage,
                   maintenance: config.maintenance || false,
