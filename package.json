@@ -5,12 +5,16 @@
   "description": "Express API for Lease Analysis (Railway-ready)",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "worker": "node src/drivaliaWorker.js",
+    "dev": "node src/server.js",
+    "dev:worker": "node src/drivaliaWorker.js"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.81.0",
     "cors": "^2.8.5",
     "csv-parser": "^3.0.0",
     "dotenv": "^16.4.5",
@@ -21,4 +25,3 @@
     "xlsx": "^0.18.5"
   }
 }
-
