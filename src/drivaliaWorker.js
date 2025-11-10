@@ -6,7 +6,7 @@
  */
 
 const { drivaliaJobsService } = require('./supabase');
-const DrivaliaAPI = require('./drivaliaAPI');
+const { DrivaliaAPI } = require('./drivaliaAPI');
 
 require('dotenv').config();
 
