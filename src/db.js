@@ -608,6 +608,222 @@ class LeaseAnalysisDB {
     }
   }
 
+  // ===================== DRIVALIA AUTOMATION =====================
+  async getDrivaliaJobs() {
+    try {
+      const result = await this.query(
+        `SELECT id, action_type, vehicle_count, success_count, failure_count, 
+                duration_seconds, error_details, created_at,
+                CASE 
+                  WHEN failure_count > 0 THEN 'failed'
+                  WHEN success_count = vehicle_count THEN 'completed' 
+                  WHEN success_count > 0 THEN 'processing'
+                  ELSE 'pending'
+                END as status
+         FROM automation_logs 
+         WHERE action_type = 'drivalia_quotes'
+         ORDER BY created_at DESC 
+         LIMIT 50`
+      );
+      return { success: true, data: result.rows };
+    } catch (error) {
+      console.error('Error fetching Drivalia jobs:', error);
+      return { success: false, error: error.message, data: [] };
+    }
+  }
+
+  async submitDrivaliaJob(payload) {
+    try {
+      const { vehicles, config } = payload;
+      const vehicleCount = vehicles?.length || 0;
+      
+      if (vehicleCount === 0) {
+        return { success: false, error: 'No vehicles provided' };
+      }
+
+      // Create automation log entry
+      const result = await this.query(
+        `INSERT INTO automation_logs (action_type, vehicle_count, success_count, failure_count, duration_seconds, error_details)
+         VALUES ('drivalia_quotes', $1, 0, 0, 0, $2)
+         RETURNING id`,
+        [vehicleCount, JSON.stringify({ config, vehicles: vehicles.slice(0, 5) })] // Store sample for debugging
+      );
+
+      const jobId = result.rows[0].id;
+
+      // Here you would typically start the background job
+      // For now, we'll return the job ID and let the automation run separately
+      this.processDrivaliaJobInBackground(jobId, vehicles, config).catch(console.error);
+
+      return { 
+        success: true, 
+        data: { 
+          jobId,
+          vehicleCount,
+          status: 'pending',
+          message: 'Job submitted successfully'
+        }
+      };
+    } catch (error) {
+      console.error('Error submitting Drivalia job:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  async processDrivaliaJobInBackground(jobId, vehicles, config) {
+    const startTime = Date.now();
+    let successCount = 0;
+    let failureCount = 0;
+    const errors = [];
+
+    try {
+      const { DrivaliaAPI } = require('./drivaliaAPI');
+      const drivaliaAPI = new DrivaliaAPI();
+      
+      console.log(`Starting Drivalia job ${jobId} with ${vehicles.length} vehicles`);
+      
+      // Login to Drivalia
+      await drivaliaAPI.login();
+      console.log('Successfully logged into Drivalia API');
+      
+      // Process vehicles in batch
+      const results = await drivaliaAPI.processBatch(vehicles, config);
+      
+      // Store results and count successes/failures
+      for (const result of results) {
+        if (result.success && result.quote) {
+          try {
+            await this.storeDrivaliaQuote(jobId, result.quote);
+            successCount++;
+          } catch (storeError) {
+            console.error('Error storing quote:', storeError);
+            failureCount++;
+            errors.push({ vehicle: result.quote.vehicle, error: storeError.message });
+          }
+        } else {
+          failureCount++;
+          errors.push({ 
+            vehicle: result.vehicle, 
+            error: result.error || 'Unknown error' 
+          });
+        }
+      }
+
+      const duration = Math.round((Date.now() - startTime) / 1000);
+      console.log(`Drivalia job ${jobId} completed: ${successCount} success, ${failureCount} failed in ${duration}s`);
+
+      // Update automation log
+      await this.query(
+        `UPDATE automation_logs 
+         SET success_count = $1, failure_count = $2, duration_seconds = $3, 
+             error_details = $4
+         WHERE id = $5`,
+        [successCount, failureCount, duration, JSON.stringify({ errors: errors.slice(0, 10) }), jobId]
+      );
+
+    } catch (error) {
+      console.error('Error processing Drivalia job:', error);
+      await this.query(
+        `UPDATE automation_logs 
+         SET failure_count = $1, error_details = $2
+         WHERE id = $3`,
+        [vehicles.length, JSON.stringify({ error: error.message }), jobId]
+      );
+    }
+  }
+
+  async storeDrivaliaQuote(jobId, quote) {
+    try {
+      // Find or create vehicle
+      const vehicleResult = await this.query(
+        `INSERT INTO vehicles (manufacturer, model, variant, cap_code, p11d_price, co2_emissions, fuel_type)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (manufacturer, model, variant) 
+         DO UPDATE SET 
+           cap_code = COALESCE(EXCLUDED.cap_code, vehicles.cap_code),
+           p11d_price = COALESCE(EXCLUDED.p11d_price, vehicles.p11d_price),
+           co2_emissions = COALESCE(EXCLUDED.co2_emissions, vehicles.co2_emissions),
+           last_updated = CURRENT_TIMESTAMP
+         RETURNING id`,
+        [
+          quote.vehicle.make,
+          quote.vehicle.model, 
+          quote.vehicle.variant,
+          quote.vehicle.capId ? quote.vehicle.capId.toString() : null,
+          quote.vehicleData.p11d,
+          quote.vehicleData.co2,
+          'Petrol' // Default, could be extracted from Drivalia data
+        ]
+      );
+
+      const vehicleId = vehicleResult.rows[0].id;
+
+      // Store the quote in lex_quotes table (reusing existing structure)
+      await this.query(
+        `INSERT INTO lex_quotes (
+          vehicle_id, manufacturer, model, variant, term, mileage,
+          monthly_rental, initial_rental, total_cost, co2, p11d,
+          maintenance, quote_id, fetched_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+        [
+          vehicleId,
+          quote.vehicle.make,
+          quote.vehicle.model,
+          quote.vehicle.variant,
+          quote.config.term,
+          quote.config.annualMileage,
+          quote.monthlyPayment.net,
+          quote.monthlyPayment.net * quote.config.term, // Initial rental estimate
+          quote.totalCost.net,
+          quote.vehicleData.co2,
+          quote.vehicleData.p11d,
+          quote.config.maintenance,
+          `drivalia_job_${jobId}_${Date.now()}`,
+          new Date()
+        ]
+      );
+
+      console.log(`Stored quote for ${quote.vehicle.make} ${quote.vehicle.model} - £${quote.monthlyPayment.net}/month`);
+    } catch (error) {
+      console.error('Error storing Drivalia quote:', error);
+      throw error;
+    }
+  }
+
+  async getDrivaliaJobResults(jobId) {
+    try {
+      // For now, return the log entry
+      // In the future, this would fetch actual quote results
+      const result = await this.query(
+        'SELECT * FROM automation_logs WHERE id = $1 AND action_type = $2',
+        [jobId, 'drivalia_quotes']
+      );
+
+      if (result.rows.length === 0) {
+        return { success: false, error: 'Job not found' };
+      }
+
+      return { success: true, data: result.rows[0] };
+    } catch (error) {
+      console.error('Error fetching Drivalia job results:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  async exportDrivaliaResults(jobId) {
+    try {
+      // For now, return a placeholder
+      // In the future, this would generate an Excel file with quotes
+      return { 
+        success: false, 
+        error: 'Export functionality not yet implemented' 
+      };
+    } catch (error) {
+      console.error('Error exporting Drivalia results:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
   async close() {
     await this.pool.end();
   }

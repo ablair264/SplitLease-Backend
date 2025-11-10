@@ -504,6 +504,54 @@ app.post('/api/mappings', async (req, res) => {
   }
 })
 
+// =============================================
+// DRIVALIA AUTOMATION
+// =============================================
+app.get('/api/drivalia/jobs', async (req, res) => {
+  try {
+    const result = await leaseDB.getDrivaliaJobs();
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/drivalia/jobs', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const result = await leaseDB.submitDrivaliaJob(payload);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/drivalia/jobs/:id/results', async (req, res) => {
+  try {
+    const jobId = parseInt(req.params.id);
+    if (!jobId) return res.status(400).json({ success: false, error: 'Invalid job ID' });
+    const result = await leaseDB.getDrivaliaJobResults(jobId);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/drivalia/jobs/:id/download', async (req, res) => {
+  try {
+    const jobId = parseInt(req.params.id);
+    if (!jobId) return res.status(400).json({ success: false, error: 'Invalid job ID' });
+    const result = await leaseDB.exportDrivaliaResults(jobId);
+    if (!result.success) return res.status(404).json(result);
+    
+    res.setHeader('Content-Disposition', `attachment; filename="drivalia-quotes-${jobId}.xlsx"`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(result.buffer);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Error handler
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err && err.stack ? err.stack : err)
