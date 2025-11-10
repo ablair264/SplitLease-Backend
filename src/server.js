@@ -104,6 +104,25 @@ app.get('/api/best-deals', async (req, res) => {
   }
 });
 
+app.get('/api/lease-offers', async (req, res) => {
+  try {
+    const filters = {
+      manufacturer: req.query.manufacturer || null,
+      fuelType: req.query.fuelType || null,
+      maxMonthly: req.query.maxMonthly ? parseFloat(req.query.maxMonthly) : null,
+      minScore: req.query.minScore ? parseFloat(req.query.minScore) : null,
+      bodyStyle: req.query.bodyStyle || null,
+      limit: parseInt(req.query.limit) || 500,
+      offset: parseInt(req.query.offset) || 0,
+    };
+    const result = await leaseDB.getBestDeals(filters);
+    if (!result.success) return res.status(500).json(result);
+    res.json({ success: true, data: result.data, filters, count: result.data.length });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.get('/api/best-deals/terms/:term/:mileage', async (req, res) => {
   try {
     const termMonths = parseInt(req.params.term);
