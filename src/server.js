@@ -609,6 +609,29 @@ app.get('/api/lex/jobs/:id/results', async (req, res) => {
   }
 });
 
+// Worker control endpoints
+const { getWorkerInstance } = require('./lexWorker');
+
+app.get('/api/lex/worker/status', async (req, res) => {
+  try {
+    const worker = getWorkerInstance();
+    const status = worker.getStatus();
+    res.json({ success: true, data: status });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post('/api/lex/worker/relogin', async (req, res) => {
+  try {
+    const worker = getWorkerInstance();
+    await worker.forceRelogin();
+    res.json({ success: true, message: 'Re-login completed successfully' });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 // Error handler
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err && err.stack ? err.stack : err)

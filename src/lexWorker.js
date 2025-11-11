@@ -22,6 +22,36 @@ class LexWorker {
     this.processingJobs = new Set();
     this.browser = null;
     this.page = null;
+    this.isLoggedIn = false;
+    this.lastLoginTime = null;
+  }
+
+  getStatus() {
+    return {
+      isRunning: !!this.browser,
+      isLoggedIn: this.isLoggedIn,
+      lastLoginTime: this.lastLoginTime,
+      processingJobs: this.processingJobs.size,
+      currentUrl: this.page ? this.page.url() : null
+    };
+  }
+
+  async forceRelogin() {
+    console.log('🔄 Force re-login requested...');
+    this.isLoggedIn = false;
+    this.lastLoginTime = null;
+    if (this.page) {
+      try {
+        const client = await this.page.target().createCDPSession();
+        await client.send('Network.clearBrowserCookies');
+        await client.send('Network.clearBrowserCache');
+        console.log('✓ Cookies and cache cleared');
+      } catch (e) {
+        console.error('Failed to clear cookies:', e.message);
+      }
+    }
+    await this.ensureLoggedIn();
+    console.log('✓ Force re-login complete');
   }
 
   async initBrowser() {
@@ -417,12 +447,19 @@ class LexWorker {
           }
         } catch {}
       });
+
+      // Mark as logged in
+      this.isLoggedIn = true;
+      this.lastLoginTime = new Date().toISOString();
+      console.log('✅ Login status updated');
     } catch (e) {
       // Dump a quick HTML snapshot to help diagnose (truncated)
       try {
         const html = await this.page.content();
         console.error('Login page snapshot (first 2k):', (html || '').slice(0, 2000));
       } catch {}
+      this.isLoggedIn = false;
+      this.lastLoginTime = null;
       throw new Error(`Lex login failed: ${e.message}`);
     }
   }
@@ -564,9 +601,19 @@ class LexWorker {
   }
 }
 
+// Singleton instance for shared access
+let workerInstance = null;
+
+function getWorkerInstance() {
+  if (!workerInstance) {
+    workerInstance = new LexWorker();
+  }
+  return workerInstance;
+}
+
 if (require.main === module) {
   (async () => {
-    const worker = new LexWorker();
+    const worker = getWorkerInstance();
     process.on('SIGINT', async () => {
       clearInterval(worker.timer);
       if (worker.browser) await worker.browser.close().catch(() => {});
@@ -586,6 +633,6 @@ if (require.main === module) {
   })();
 }
 
-module.exports = LexWorker;
+module.exports = { LexWorker, getWorkerInstance };
 
 
