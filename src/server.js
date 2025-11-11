@@ -420,9 +420,23 @@ app.post('/api/upload', (req, res, next) => {
           ? Number(upfrontMultiplierRaw)
           : null;
 
-      const normalized = vehicleData.map((v) => {
+      console.log('Upfront multiplier:', { raw: upfrontMultiplierRaw, parsed: upfrontMultiplier });
+
+      const normalized = vehicleData.map((v, idx) => {
         const monthlyRental = parseNumber(v.monthly_rental);
         let upfrontPayment = parseNumber(v.upfront_payment ?? v.upfront);
+
+        // Debug first row
+        if (idx === 0) {
+          console.log('First vehicle upfront calculation:', {
+            monthly_rental: monthlyRental,
+            upfront_payment_raw: v.upfront_payment,
+            upfront_raw: v.upfront,
+            upfront_parsed: upfrontPayment,
+            upfront_multiplier: upfrontMultiplier
+          });
+        }
+
         // If mapped upfront looks like months (1/3/6/9/12), convert to amount using monthly
         if ((upfrontPayment === 1 || upfrontPayment === 3 || upfrontPayment === 6 || upfrontPayment === 9 || upfrontPayment === 12) && monthlyRental) {
           upfrontPayment = monthlyRental * upfrontPayment;
@@ -430,6 +444,9 @@ app.post('/api/upload', (req, res, next) => {
         // If no upfront mapped, use global multiplier if provided
         if ((!upfrontPayment || upfrontPayment === 0) && upfrontMultiplier && monthlyRental) {
           upfrontPayment = monthlyRental * upfrontMultiplier;
+          if (idx === 0) {
+            console.log('Applied multiplier, upfront now:', upfrontPayment);
+          }
         }
         return {
           provider_name: providerName,
