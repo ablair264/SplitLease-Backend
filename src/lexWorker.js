@@ -38,8 +38,16 @@ class LexWorker {
 
   async forceRelogin() {
     console.log('🔄 Force re-login requested...');
+
+    // Check if browser is initialized
+    if (!this.browser || !this.page) {
+      console.log('⚠️  Browser not initialized, initializing now...');
+      await this.initBrowser();
+    }
+
     this.isLoggedIn = false;
     this.lastLoginTime = null;
+
     if (this.page) {
       try {
         const client = await this.page.target().createCDPSession();
@@ -50,7 +58,9 @@ class LexWorker {
         console.error('Failed to clear cookies:', e.message);
       }
     }
+
     await this.ensureLoggedIn();
+    await this.injectAutomationScript();
     console.log('✓ Force re-login complete');
   }
 
