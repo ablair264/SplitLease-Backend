@@ -6,6 +6,7 @@ const csv = require('csv-parser');
 const XLSX = require('xlsx');
 const { Readable } = require('stream');
 const { leaseDB } = require('./db');
+const { parseVehicleDescription } = require('./vehicleParser');
 
 const app = express();
 
@@ -286,6 +287,29 @@ app.post('/api/upload', (req, res, next) => {
   next()
 }, upload.single('file'), async (req, res) => {
   try {
+    // Helper: if model actually contains full description, derive model + variant
+    const applyVehicleParsing = (vehicle) => {
+      try {
+        const manufacturer = (vehicle.manufacturer || '').toString().trim()
+        if (!manufacturer) return vehicle
+        const descCandidate =
+          (vehicle.vehicle_description || vehicle.vehicleDescription || '').toString().trim() ||
+          (vehicle.model || '').toString().trim()
+        if (!descCandidate) return vehicle
+        // Only parse if description starts with manufacturer or variant missing
+        const startsWithMfr = descCandidate.toLowerCase().startsWith(manufacturer.toLowerCase())
+        const missingModelOrVariant = !vehicle.model || !vehicle.variant
+        if (startsWithMfr || missingModelOrVariant) {
+          const parsed = parseVehicleDescription(manufacturer, descCandidate)
+          if (parsed && parsed.model) vehicle.model = parsed.model
+          if (parsed && typeof parsed.variant === 'string') vehicle.variant = parsed.variant
+        }
+      } catch (_) {
+        // best-effort parsing; ignore failures
+      }
+      return vehicle
+    }
+
     const file = req.file;
     const providerName = req.body.providerName;
     const fieldMappings = JSON.parse(req.body.fieldMappings || '{}');
@@ -333,7 +357,7 @@ app.post('/api/upload', (req, res, next) => {
             vehicle[field] = row[index];
           }
         });
-        return vehicle;
+        return applyVehicleParsing(vehicle);
       });
     } else {
       // CSV buffer parse with stable header order; prefer client-provided headerNames
@@ -363,7 +387,7 @@ app.post('/api/upload', (req, res, next) => {
                 vehicle[field] = row[headerName];
               }
             });
-            results.push(vehicle);
+            results.push(applyVehicleParsing(vehicle));
           })
           .on('end', () => resolve(results))
           .on('error', reject);
