@@ -15,6 +15,7 @@ const { lexJobsService } = require('./supabase');
 const POLL_INTERVAL = parseInt(process.env.JOB_POLL_INTERVAL_MS) || 7000;
 const MAX_CONCURRENT_JOBS = parseInt(process.env.MAX_CONCURRENT_JOBS) || 1;
 const LEX_BASE_URL = process.env.LEX_BASE_URL || 'https://associate.lexautolease.co.uk/';
+const LEX_LOGIN_URL = process.env.LEX_LOGIN_URL || `${LEX_BASE_URL.replace(/\/$/, '')}/Login.aspx`;
 
 class LexWorker {
   constructor() {
@@ -30,15 +31,32 @@ class LexWorker {
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
     });
     this.page = await this.browser.newPage();
+    await this.page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36');
+    await this.page.setViewport({ width: 1366, height: 900 });
+    await this.page.setExtraHTTPHeaders({ 'Accept-Language': 'en-GB,en;q=0.9' });
     this.page.setDefaultTimeout(60000);
   }
 
   async ensureLoggedIn() {
-    await this.page.goto(LEX_BASE_URL, { waitUntil: 'networkidle2' });
-    const isLoggedIn = await this.page.evaluate(() => {
-      return !!(window && (window.profile || document.querySelector('#selManufacturers')));
-    }).catch(() => false);
+    // Always start from the explicit login URL
+    await this.page.goto(LEX_LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
+    // Quick cookie banner dismissal (best-effort)
+    try {
+      await this.page.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('button, a')).filter(b => {
+          const t = (b.textContent || '').toLowerCase();
+          const id = (b.id || '').toLowerCase();
+          return t.includes('accept') || t.includes('agree') || id.includes('accept') || id.includes('consent');
+        });
+        if (btns[0]) btns[0].click();
+      });
+    } catch {}
+
+    // If already logged in, return
+    const isLoggedIn = await this.page.evaluate(() => {
+      return !!(window && (window.profile || document.querySelector('#selManufacturers') || document.querySelector('#selModels')));
+    }).catch(() => false);
     if (isLoggedIn) return;
 
     const username = process.env.LEX_USERNAME;
@@ -47,23 +65,69 @@ class LexWorker {
       throw new Error('Missing LEX_USERNAME/LEX_PASSWORD env vars');
     }
 
-    // Heuristic login: attempt to find username/password inputs and submit
-    // This might need adjusting if Lex changes markup.
     try {
-      // Common selectors; adjust as needed
-      const userSel = 'input[type="text"], input[name="username"], #username';
-      const passSel = 'input[type="password"], #password';
-      await this.page.waitForSelector(userSel, { timeout: 15000 });
-      const userInput = await this.page.$(userSel);
-      const passInput = await this.page.$(passSel);
-      if (!userInput || !passInput) throw new Error('Login form not found');
-      await userInput.click({ clickCount: 3 });
-      await userInput.type(username, { delay: 20 });
-      await passInput.type(password, { delay: 20 });
-      // Try submit by pressing Enter
-      await passInput.press('Enter');
-      await this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
+      // Try multiple selector candidates typical for ASP.NET WebForms
+      const usernameSelectors = [
+        'input[name="ctl00$ContentPlaceHolder1$tbUserName"]',
+        'input[id*="tbUserName"]',
+        'input[name="username"]',
+        '#username',
+        'input[type="email"]',
+        'input[type="text"]'
+      ];
+      const passwordSelectors = [
+        'input[name="ctl00$ContentPlaceHolder1$tbPassword"]',
+        'input[id*="tbPassword"]',
+        'input[name="password"]',
+        '#password',
+        'input[type="password"]'
+      ];
+      let userSel = null;
+      for (const sel of usernameSelectors) {
+        if (await this.page.$(sel)) { userSel = sel; break; }
+      }
+      let passSel = null;
+      for (const sel of passwordSelectors) {
+        if (await this.page.$(sel)) { passSel = sel; break; }
+      }
+      if (!userSel || !passSel) {
+        throw new Error('Login form not found (no username/password field)');
+      }
+      await this.page.click(userSel, { clickCount: 3 });
+      await this.page.type(userSel, username, { delay: 15 });
+      await this.page.type(passSel, password, { delay: 15 });
+
+      // Try known submit buttons, else press Enter
+      const submitSelectors = [
+        'input[type="submit"]',
+        'button[type="submit"]',
+        'input[id*="btnLogin"]',
+        'button[id*="btnLogin"]',
+        'a[id*="btnLogin"]'
+      ];
+      let clicked = false;
+      for (const sel of submitSelectors) {
+        const el = await this.page.$(sel);
+        if (el) { await el.click(); clicked = true; break; }
+      }
+      if (!clicked) {
+        const passEl = await this.page.$(passSel);
+        if (passEl) await passEl.press('Enter');
+      }
+
+      // Wait for either dashboard elements or an authenticated indicator
+      await this.page.waitForFunction(() => {
+        return !!(window && (window.profile)) ||
+               document.querySelector('#selManufacturers') ||
+               document.querySelector('#selModels') ||
+               document.body.innerText.toLowerCase().includes('welcome');
+      }, { timeout: 45000 });
     } catch (e) {
+      // Dump a quick HTML snapshot to help diagnose (truncated)
+      try {
+        const html = await this.page.content();
+        console.error('Login page snapshot (first 2k):', (html || '').slice(0, 2000));
+      } catch {}
       throw new Error(`Lex login failed: ${e.message}`);
     }
   }
