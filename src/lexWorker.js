@@ -66,61 +66,74 @@ class LexWorker {
     }
 
     try {
-      // Try multiple selector candidates typical for ASP.NET WebForms
-      const usernameSelectors = [
-        'input[name="ctl00$ContentPlaceHolder1$tbUserName"]',
-        'input[id*="tbUserName"]',
-        'input[name="username"]',
-        '#username',
-        'input[type="email"]',
-        'input[type="text"]'
-      ];
-      const passwordSelectors = [
-        'input[name="ctl00$ContentPlaceHolder1$tbPassword"]',
-        'input[id*="tbPassword"]',
-        'input[name="password"]',
-        '#password',
-        'input[type="password"]'
-      ];
-      let userSel = null;
-      for (const sel of usernameSelectors) {
-        if (await this.page.$(sel)) { userSel = sel; break; }
-      }
-      let passSel = null;
-      for (const sel of passwordSelectors) {
-        if (await this.page.$(sel)) { passSel = sel; break; }
-      }
-      if (!userSel || !passSel) {
-        throw new Error('Login form not found (no username/password field)');
-      }
-      await this.page.click(userSel, { clickCount: 3 });
-      await this.page.type(userSel, username, { delay: 15 });
-      await this.page.type(passSel, password, { delay: 15 });
+      // Wait for the WebForms login form
+      await this.page.waitForSelector('#frmLogon, form[name="frmLogon"]', { timeout: 30000 });
 
-      // Try known submit buttons, else press Enter
-      const submitSelectors = [
-        'input[type="submit"]',
-        'button[type="submit"]',
-        'input[id*="btnLogin"]',
-        'button[id*="btnLogin"]',
-        'a[id*="btnLogin"]'
-      ];
-      let clicked = false;
-      for (const sel of submitSelectors) {
-        const el = await this.page.$(sel);
-        if (el) { await el.click(); clicked = true; break; }
-      }
-      if (!clicked) {
-        const passEl = await this.page.$(passSel);
-        if (passEl) await passEl.press('Enter');
-      }
+      // Fill and submit via JS to avoid overlay/clickability issues
+      await this.page.evaluate((creds) => {
+        // Dismiss simple overlays if any
+        try {
+          const anti = document.getElementById('antiClickjack');
+          if (anti && anti.parentNode) anti.parentNode.removeChild(anti);
+        } catch {}
+        try {
+          const pm = document.getElementById('Privacy Manager');
+          if (pm && pm.parentNode) pm.parentNode.removeChild(pm);
+        } catch {}
 
-      // Wait for either dashboard elements or an authenticated indicator
+        const form = document.getElementById('frmLogon') || document.forms['frmLogon'] || document.querySelector('form#frmLogon, form[name="frmLogon"]');
+        if (!form) throw new Error('frmLogon not found');
+
+        // Find username/password fields by common ids/names on Lex
+        const userCandidates = [
+          () => form.txtUserName,
+          () => form.querySelector('#txtUserName'),
+          () => form.querySelector('input[name="txtUserName"]'),
+          () => form.querySelector('input[id*="UserName"]'),
+          () => form.querySelector('input[type="text"]'),
+          () => form.querySelector('input[type="email"]')
+        ];
+        const passCandidates = [
+          () => form.txtPassword,
+          () => form.querySelector('#txtPassword'),
+          () => form.querySelector('input[name="txtPassword"]'),
+          () => form.querySelector('input[id*=\"Password\"]'),
+          () => form.querySelector('input[type=\"password\"]')
+        ];
+        let userEl = null;
+        for (const fn of userCandidates) { try { userEl = fn(); if (userEl) break; } catch {} }
+        let passEl = null;
+        for (const fn of passCandidates) { try { passEl = fn(); if (passEl) break; } catch {} }
+        if (!userEl || !passEl) throw new Error('username/password inputs not found');
+
+        userEl.focus();
+        userEl.value = creds.username;
+        passEl.value = creds.password;
+
+        // Prefer clicking default submit within the form
+        let submitEl =
+          form.querySelector('#btnLogon') ||
+          form.querySelector('input[id*=\"btnLogon\"]') ||
+          form.querySelector('button[id*=\"btnLogon\"]') ||
+          form.querySelector('input[type=\"submit\"]') ||
+          form.querySelector('button[type=\"submit\"]');
+
+        if (submitEl) {
+          submitEl.click();
+        } else if (typeof window.__doPostBack === 'function') {
+          try { window.__doPostBack('btnLogon', ''); } catch { form.submit(); }
+        } else {
+          form.submit();
+        }
+      }, { username, password });
+
+      // Wait for redirect away from Login.aspx
+      await this.page.waitForFunction(() => !/Login\.aspx/i.test(location.href), { timeout: 45000 });
+      // Then wait for a sign of authenticated session
       await this.page.waitForFunction(() => {
         return !!(window && (window.profile)) ||
                document.querySelector('#selManufacturers') ||
-               document.querySelector('#selModels') ||
-               document.body.innerText.toLowerCase().includes('welcome');
+               document.querySelector('#selModels');
       }, { timeout: 45000 });
     } catch (e) {
       // Dump a quick HTML snapshot to help diagnose (truncated)
