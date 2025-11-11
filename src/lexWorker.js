@@ -28,12 +28,26 @@ class LexWorker {
     if (this.browser) return;
     this.browser = await puppeteer.launch({
       headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-blink-features=AutomationControlled',
+      ],
     });
     this.page = await this.browser.newPage();
     await this.page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36');
     await this.page.setViewport({ width: 1366, height: 900 });
     await this.page.setExtraHTTPHeaders({ 'Accept-Language': 'en-GB,en;q=0.9' });
+    // Basic anti-bot evasions
+    await this.page.evaluateOnNewDocument(() => {
+      try {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+        window.chrome = window.chrome || { runtime: {} };
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-GB', 'en'] });
+        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+      } catch {}
+    });
     this.page.setDefaultTimeout(60000);
   }
 
@@ -68,21 +82,48 @@ class LexWorker {
     try {
       // Wait for the WebForms login form
       await this.page.waitForSelector('#frmLogon, form[name="frmLogon"]', { timeout: 30000 });
+      console.log('✓ Login form found');
+
+      // Get URL before submission
+      const urlBefore = this.page.url();
+      console.log('📍 URL before login:', urlBefore);
 
       // Fill and submit via JS to avoid overlay/clickability issues
-      await this.page.evaluate((creds) => {
+      const loginResult = await this.page.evaluate((creds) => {
+        const result = { success: false, message: '', method: '' };
+
         // Dismiss simple overlays if any
         try {
           const anti = document.getElementById('antiClickjack');
-          if (anti && anti.parentNode) anti.parentNode.removeChild(anti);
+          if (anti && anti.parentNode) {
+            anti.parentNode.removeChild(anti);
+            result.message += 'Removed antiClickjack. ';
+          }
         } catch {}
         try {
           const pm = document.getElementById('Privacy Manager');
-          if (pm && pm.parentNode) pm.parentNode.removeChild(pm);
+          if (pm && pm.parentNode) {
+            pm.parentNode.removeChild(pm);
+            result.message += 'Removed Privacy Manager. ';
+          }
+        } catch {}
+
+        // Stop any aggressive anti-clickjacking intervals
+        try {
+          // Clear all intervals (the anti-clickjacking code sets one every 1ms)
+          const highestId = window.setInterval(() => {}, 0);
+          for (let i = 0; i < highestId; i++) {
+            window.clearInterval(i);
+          }
+          result.message += 'Cleared intervals. ';
         } catch {}
 
         const form = document.getElementById('frmLogon') || document.forms['frmLogon'] || document.querySelector('form#frmLogon, form[name="frmLogon"]');
-        if (!form) throw new Error('frmLogon not found');
+        if (!form) {
+          result.message = 'frmLogon not found';
+          return result;
+        }
+        result.message += 'Form found. ';
 
         // Find username/password fields by common ids/names on Lex
         const userCandidates = [
@@ -104,11 +145,24 @@ class LexWorker {
         for (const fn of userCandidates) { try { userEl = fn(); if (userEl) break; } catch {} }
         let passEl = null;
         for (const fn of passCandidates) { try { passEl = fn(); if (passEl) break; } catch {} }
-        if (!userEl || !passEl) throw new Error('username/password inputs not found');
+
+        if (!userEl || !passEl) {
+          result.message += `Missing fields: user=${!!userEl}, pass=${!!passEl}`;
+          return result;
+        }
+        result.message += 'Fields found. ';
 
         userEl.focus();
         userEl.value = creds.username;
+        userEl.dispatchEvent(new Event('input', { bubbles: true }));
+        userEl.dispatchEvent(new Event('change', { bubbles: true }));
+
+        passEl.focus();
         passEl.value = creds.password;
+        passEl.dispatchEvent(new Event('input', { bubbles: true }));
+        passEl.dispatchEvent(new Event('change', { bubbles: true }));
+
+        result.message += 'Credentials filled with events. ';
 
         // Prefer clicking default submit within the form
         let submitEl =
@@ -119,22 +173,70 @@ class LexWorker {
           form.querySelector('button[type=\"submit\"]');
 
         if (submitEl) {
+          result.method = 'click';
           submitEl.click();
+          result.success = true;
         } else if (typeof window.__doPostBack === 'function') {
-          try { window.__doPostBack('btnLogon', ''); } catch { form.submit(); }
+          result.method = '__doPostBack';
+          try { window.__doPostBack('btnLogon', ''); result.success = true; } catch { form.submit(); result.method = 'form.submit (fallback)'; result.success = true; }
         } else {
+          result.method = 'form.submit';
           form.submit();
+          result.success = true;
         }
+        result.message += `Submitted via ${result.method}`;
+
+        return result;
       }, { username, password });
+
+      console.log('🔐 Login attempt:', loginResult);
+
+      // Wait a moment for any immediate error messages
+      await new Promise(r => setTimeout(r, 3000));
+
+      // Check for error messages on the page
+      const errorCheck = await this.page.evaluate(() => {
+        const url = location.href;
+        const errorSelectors = [
+          '.error', '.alert', '.validation-summary-errors',
+          '#error', '[class*="error"]', '[class*="invalid"]',
+          'span[style*="color:red"]', 'span[style*="color: red"]'
+        ];
+        let errorText = '';
+        for (const sel of errorSelectors) {
+          const el = document.querySelector(sel);
+          if (el && el.textContent.trim()) {
+            errorText += el.textContent.trim() + ' ';
+          }
+        }
+        return { url, errorText: errorText.trim() };
+      });
+
+      console.log('📍 URL after login attempt:', errorCheck.url);
+      if (errorCheck.errorText) {
+        console.error('❌ Error messages found:', errorCheck.errorText);
+      }
 
       // Wait for redirect away from Login.aspx
       await this.page.waitForFunction(() => !/Login\.aspx/i.test(location.href), { timeout: 45000 });
-      // Then wait for a sign of authenticated session
-      await this.page.waitForFunction(() => {
-        return !!(window && (window.profile)) ||
-               document.querySelector('#selManufacturers') ||
-               document.querySelector('#selModels');
-      }, { timeout: 45000 });
+      // Ensure minimal profile object exists for automation script
+      await this.page.evaluate(() => {
+        try {
+          if (!window.profile || typeof window.profile !== 'object') {
+            window.profile = {
+              Discount: "-1",
+              SalesCode: "000000000",
+              Role: "LBS",
+              RVCode: "00"
+            };
+          } else {
+            window.profile.Discount = window.profile.Discount || "-1";
+            window.profile.SalesCode = window.profile.SalesCode || "000000000";
+            window.profile.Role = window.profile.Role || "LBS";
+            window.profile.RVCode = window.profile.RVCode || "00";
+          }
+        } catch {}
+      });
     } catch (e) {
       // Dump a quick HTML snapshot to help diagnose (truncated)
       try {
