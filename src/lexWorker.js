@@ -106,6 +106,46 @@ class LexWorker {
       const urlBefore = this.page.url();
       console.log('📍 URL before login:', urlBefore);
 
+      // Try using Puppeteer's native form filling instead of JS
+      console.log('🔤 Attempting native Puppeteer form fill...');
+
+      // Find the username and password fields
+      const userSelector = '#txtUserName, input[name="txtUserName"]';
+      const passSelector = '#txtPassword, input[name="txtPassword"]';
+
+      try {
+        await this.page.waitForSelector(userSelector, { timeout: 5000 });
+        await this.page.waitForSelector(passSelector, { timeout: 5000 });
+
+        // Clear and type with Puppeteer
+        await this.page.click(userSelector, { clickCount: 3 }); // Select all
+        await this.page.type(userSelector, username, { delay: 50 });
+        console.log('✓ Username filled');
+
+        await this.page.click(passSelector, { clickCount: 3 }); // Select all
+        await this.page.type(passSelector, password, { delay: 50 });
+        console.log('✓ Password filled');
+
+        // Find and click submit button
+        const submitSelector = '#btnLogon, input[id*="btnLogon"], button[id*="btnLogon"]';
+        await this.page.waitForSelector(submitSelector, { timeout: 5000 });
+
+        console.log('🖱️  Clicking login button with Puppeteer...');
+
+        // Wait for navigation after clicking submit
+        await Promise.all([
+          this.page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 30000 }).catch(e => {
+            console.log('Navigation timeout or no navigation:', e.message);
+          }),
+          this.page.click(submitSelector)
+        ]);
+
+        console.log('✓ Submit button clicked, checking result...');
+
+      } catch (nativeError) {
+        console.warn('Native form fill failed:', nativeError.message);
+        console.log('Falling back to JavaScript form submission...');
+
       // Fill and submit via JS to avoid overlay/clickability issues
       const loginResult = await this.page.evaluate((creds) => {
         const result = { success: false, message: '', method: '' };
@@ -207,15 +247,16 @@ class LexWorker {
         return result;
       }, { username, password });
 
-      console.log('🔐 Login attempt:', loginResult);
+        console.log('🔐 Login attempt:', loginResult);
 
-      // Wait for either navigation or timeout
-      console.log('⏸️  Waiting for navigation or 5 seconds...');
-      await Promise.race([
-        this.page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => null),
-        new Promise(r => setTimeout(r, 5000))
-      ]);
-      console.log('⏸️  Wait complete, checking page state...');
+        // Wait for either navigation or timeout
+        console.log('⏸️  Waiting for navigation or 5 seconds...');
+        await Promise.race([
+          this.page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => null),
+          new Promise(r => setTimeout(r, 5000))
+        ]);
+        console.log('⏸️  Wait complete, checking page state...');
+      } // End of fallback try block
 
       // Check current URL first (simple operation)
       let currentUrl;
