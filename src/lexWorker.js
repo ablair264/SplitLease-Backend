@@ -385,7 +385,36 @@ class LexWorker {
           console.log('📄 Page text preview:', pageText.substring(0, 500));
         } catch (e) {
           console.warn('Could not get page text:', e.message);
-          pageText = '';
+          console.error('⚠️  Page is completely unresponsive to JavaScript!');
+          console.error('This usually means:');
+          console.error('  1. Concurrent session blocking (someone else logged in on the web)');
+          console.error('  2. Page has frozen/crashed');
+          console.error('  3. Anti-bot protection activated');
+          console.error('');
+          console.error('💡 Solution: Manually log out from https://associate.lexautolease.co.uk/Logoff.aspx');
+          console.error('Then restart the worker (redeploy on Railway).');
+          console.error('');
+
+          // Try one last time: reload the page
+          console.log('🔄 Attempting page reload as last resort...');
+          try {
+            await this.page.reload({ waitUntil: 'domcontentloaded', timeout: 10000 });
+            await new Promise(r => setTimeout(r, 2000));
+
+            // Check URL after reload
+            const urlAfterReload = this.page.url();
+            if (!/Login\.aspx/i.test(urlAfterReload)) {
+              console.log('✅ Reload worked! Redirected to:', urlAfterReload);
+              // Continue with success
+              pageText = '';
+            } else {
+              console.error('❌ Still stuck on Login.aspx after reload');
+              throw new Error('Login page completely unresponsive. Manual logout from web required, then redeploy worker.');
+            }
+          } catch (reloadError) {
+            console.error('Reload failed:', reloadError.message);
+            throw new Error('Login page completely unresponsive. Manual logout from web required, then redeploy worker.');
+          }
         }
 
         // Check for session warning messages
