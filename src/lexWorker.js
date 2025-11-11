@@ -249,7 +249,7 @@ class LexWorker {
 
   async injectAutomationScript() {
     // Load the front-end automation script and inject into page context
-    const scriptPath = path.resolve(__dirname, '../../LexRobot/lex-autolease-api-automation.js');
+    const scriptPath = path.resolve(__dirname, './automation/lex-autolease-api-automation.js');
     const scriptContent = fs.readFileSync(scriptPath, 'utf8');
     await this.page.addScriptTag({ content: scriptContent });
     const ok = await this.page.evaluate(() => !!window.LexAutoQuoteAutomation);
