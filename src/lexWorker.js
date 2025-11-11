@@ -191,8 +191,13 @@ class LexWorker {
 
       console.log('🔐 Login attempt:', loginResult);
 
-      // Wait a moment for any immediate error messages
-      await new Promise(r => setTimeout(r, 3000));
+      // Wait for either navigation or timeout
+      console.log('⏸️  Waiting for navigation or 5 seconds...');
+      await Promise.race([
+        this.page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => null),
+        new Promise(r => setTimeout(r, 5000))
+      ]);
+      console.log('⏸️  Wait complete, checking page state...');
 
       // Check for error messages on the page
       const errorCheck = await this.page.evaluate(() => {
@@ -215,10 +220,60 @@ class LexWorker {
       console.log('📍 URL after login attempt:', errorCheck.url);
       if (errorCheck.errorText) {
         console.error('❌ Error messages found:', errorCheck.errorText);
+        throw new Error(`Login validation errors: ${errorCheck.errorText}`);
+      }
+
+      // Check if we're still on login page after submission
+      if (/Login\.aspx/i.test(errorCheck.url)) {
+        console.warn('⚠️  Still on Login.aspx after submission - checking for issues...');
+
+        // Check for validation errors (ASP.NET style)
+        const validationCheck = await this.page.evaluate(() => {
+          // Check for validation summary
+          const valSummary = document.querySelector('.validation-summary-errors ul');
+          if (valSummary) {
+            return { error: valSummary.textContent.trim() };
+          }
+
+          // Check for field validators
+          const validators = document.querySelectorAll('span[id*="Validator"]');
+          const errors = [];
+          validators.forEach(v => {
+            if (v.style.visibility !== 'hidden' && v.textContent.trim()) {
+              errors.push(v.textContent.trim());
+            }
+          });
+          if (errors.length) {
+            return { error: errors.join('; ') };
+          }
+
+          // Check if form inputs have values (to verify credentials were filled)
+          const userInput = document.querySelector('#txtUserName, input[name="txtUserName"]');
+          const passInput = document.querySelector('#txtPassword, input[name="txtPassword"]');
+
+          return {
+            userFilled: userInput ? !!userInput.value : false,
+            passFilled: passInput ? !!passInput.value : false,
+            error: null
+          };
+        });
+
+        if (validationCheck.error) {
+          throw new Error(`Login validation failed: ${validationCheck.error}`);
+        }
+
+        console.log('🔍 Form state check:', validationCheck);
+
+        // If no validation errors, credentials might be wrong (silent rejection)
+        if (validationCheck.userFilled && validationCheck.passFilled) {
+          throw new Error('Login form submitted but still on Login.aspx - likely invalid credentials or server rejected login');
+        }
       }
 
       // Wait for redirect away from Login.aspx
+      console.log('⏳ Waiting for redirect away from Login.aspx...');
       await this.page.waitForFunction(() => !/Login\.aspx/i.test(location.href), { timeout: 45000 });
+      console.log('✅ Redirected successfully!');
       // Ensure minimal profile object exists for automation script
       await this.page.evaluate(() => {
         try {
