@@ -199,35 +199,60 @@ class LexWorker {
       ]);
       console.log('⏸️  Wait complete, checking page state...');
 
-      // Check for error messages on the page
-      const errorCheck = await this.page.evaluate(() => {
-        const url = location.href;
-        const errorSelectors = [
-          '.error', '.alert', '.validation-summary-errors',
-          '#error', '[class*="error"]', '[class*="invalid"]',
-          'span[style*="color:red"]', 'span[style*="color: red"]'
-        ];
-        let errorText = '';
-        for (const sel of errorSelectors) {
-          const el = document.querySelector(sel);
-          if (el && el.textContent.trim()) {
-            errorText += el.textContent.trim() + ' ';
-          }
-        }
-        return { url, errorText: errorText.trim() };
-      });
-
-      console.log('📍 URL after login attempt:', errorCheck.url);
-      if (errorCheck.errorText) {
-        console.error('❌ Error messages found:', errorCheck.errorText);
-        throw new Error(`Login validation errors: ${errorCheck.errorText}`);
+      // Check current URL first (simple operation)
+      let currentUrl;
+      try {
+        currentUrl = this.page.url();
+        console.log('📍 Current URL:', currentUrl);
+      } catch (e) {
+        console.error('Failed to get URL:', e.message);
+        throw new Error('Page became unresponsive after login attempt');
       }
 
-      // Check if we're still on login page after submission
-      if (/Login\.aspx/i.test(errorCheck.url)) {
-        console.warn('⚠️  Still on Login.aspx after submission - checking for issues...');
+      // If we've already redirected away from Login.aspx, we're good!
+      if (!/Login\.aspx/i.test(currentUrl)) {
+        console.log('✅ Already redirected away from Login.aspx!');
+        // Skip validation checks and jump to profile setup
+      } else {
+        console.log('⚠️  Still on Login.aspx, checking for errors...');
+
+        // Check for error messages on the page with timeout
+        let errorCheck;
+        try {
+          errorCheck = await Promise.race([
+            this.page.evaluate(() => {
+              const url = location.href;
+              const errorSelectors = [
+                '.error', '.alert', '.validation-summary-errors',
+                '#error', '[class*="error"]', '[class*="invalid"]',
+                'span[style*="color:red"]', 'span[style*="color: red"]'
+              ];
+              let errorText = '';
+              for (const sel of errorSelectors) {
+                const el = document.querySelector(sel);
+                if (el && el.textContent.trim()) {
+                  errorText += el.textContent.trim() + ' ';
+                }
+              }
+              return { url, errorText: errorText.trim() };
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('evaluate timeout')), 3000))
+          ]);
+        } catch (e) {
+          console.error('Failed to evaluate page:', e.message);
+          // Try to get URL directly
+          errorCheck = { url: currentUrl, errorText: '' };
+        }
+
+        console.log('📍 URL from evaluate:', errorCheck.url);
+
+        if (errorCheck.errorText) {
+          console.error('❌ Error messages found:', errorCheck.errorText);
+          throw new Error(`Login validation errors: ${errorCheck.errorText}`);
+        }
 
         // Check for validation errors (ASP.NET style)
+        console.log('🔍 Checking for ASP.NET validation errors...');
         const validationCheck = await this.page.evaluate(() => {
           // Check for validation summary
           const valSummary = document.querySelector('.validation-summary-errors ul');
@@ -268,12 +293,12 @@ class LexWorker {
         if (validationCheck.userFilled && validationCheck.passFilled) {
           throw new Error('Login form submitted but still on Login.aspx - likely invalid credentials or server rejected login');
         }
-      }
 
-      // Wait for redirect away from Login.aspx
-      console.log('⏳ Waiting for redirect away from Login.aspx...');
-      await this.page.waitForFunction(() => !/Login\.aspx/i.test(location.href), { timeout: 45000 });
-      console.log('✅ Redirected successfully!');
+        // Wait for redirect away from Login.aspx
+        console.log('⏳ Waiting for redirect away from Login.aspx...');
+        await this.page.waitForFunction(() => !/Login\.aspx/i.test(location.href), { timeout: 45000 });
+        console.log('✅ Redirected successfully!');
+      }
       // Ensure minimal profile object exists for automation script
       await this.page.evaluate(() => {
         try {
