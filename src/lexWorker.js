@@ -52,7 +52,25 @@ class LexWorker {
   }
 
   async ensureLoggedIn() {
+    // Clear cookies to avoid session conflicts
+    console.log('🧹 Clearing cookies to start fresh session...');
+    const client = await this.page.target().createCDPSession();
+    await client.send('Network.clearBrowserCookies');
+    await client.send('Network.clearBrowserCache');
+
+    // Visit logout URL first to end any previous session
+    console.log('🚪 Visiting logout URL to end any previous sessions...');
+    try {
+      await this.page.goto(`${LEX_BASE_URL.replace(/\/$/, '')}/Logout.aspx`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 10000
+      }).catch(() => {});
+    } catch (e) {
+      console.log('Logout attempt completed (may have errored if no session)');
+    }
+
     // Always start from the explicit login URL
+    console.log('🔗 Navigating to login page...');
     await this.page.goto(LEX_LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
     // Quick cookie banner dismissal (best-effort)
@@ -251,53 +269,70 @@ class LexWorker {
           throw new Error(`Login validation errors: ${errorCheck.errorText}`);
         }
 
-        // Check for validation errors (ASP.NET style)
-        console.log('🔍 Checking for ASP.NET validation errors...');
-        const validationCheck = await this.page.evaluate(() => {
-          // Check for validation summary
-          const valSummary = document.querySelector('.validation-summary-errors ul');
-          if (valSummary) {
-            return { error: valSummary.textContent.trim() };
-          }
+        // Check for concurrent session warning (common on Lex)
+        console.log('🔍 Checking for concurrent session warning...');
+        let pageText;
+        try {
+          pageText = await Promise.race([
+            this.page.evaluate(() => document.body ? document.body.innerText : ''),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))
+          ]);
+          console.log('📄 Page text preview:', pageText.substring(0, 500));
+        } catch (e) {
+          console.warn('Could not get page text:', e.message);
+          pageText = '';
+        }
 
-          // Check for field validators
-          const validators = document.querySelectorAll('span[id*="Validator"]');
-          const errors = [];
-          validators.forEach(v => {
-            if (v.style.visibility !== 'hidden' && v.textContent.trim()) {
-              errors.push(v.textContent.trim());
-            }
+        // Check for session warning messages
+        const sessionWarnings = [
+          'previous logged in session is still active',
+          'session is still active',
+          'already logged in',
+          'concurrent session',
+          'try again later'
+        ];
+
+        const hasSessionWarning = sessionWarnings.some(warning =>
+          pageText.toLowerCase().includes(warning)
+        );
+
+        if (hasSessionWarning) {
+          console.error('⚠️  Concurrent session detected!');
+          console.error('Lex Autolease only allows one active session at a time.');
+          console.error('The Puppeteer browser is holding an active session.');
+          console.error('Waiting 10 seconds for session to potentially expire...');
+
+          await new Promise(r => setTimeout(r, 10000));
+
+          // Try refreshing and logging in again
+          console.log('🔄 Attempting to refresh and retry login...');
+          await this.page.goto(LEX_LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+
+          // Look for a "force logout" or "continue" button
+          const forceLoginButton = await this.page.evaluate(() => {
+            const buttons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], a'));
+            const continueBtn = buttons.find(b => {
+              const text = (b.textContent || b.value || '').toLowerCase();
+              return text.includes('continue') || text.includes('force') || text.includes('override') || text.includes('logout previous');
+            });
+            return continueBtn ? true : false;
           });
-          if (errors.length) {
-            return { error: errors.join('; ') };
+
+          if (forceLoginButton) {
+            console.log('Found force login button, clicking...');
+            await this.page.evaluate(() => {
+              const buttons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], a'));
+              const continueBtn = buttons.find(b => {
+                const text = (b.textContent || b.value || '').toLowerCase();
+                return text.includes('continue') || text.includes('force') || text.includes('override') || text.includes('logout previous');
+              });
+              if (continueBtn) continueBtn.click();
+            });
+            await new Promise(r => setTimeout(r, 3000));
           }
-
-          // Check if form inputs have values (to verify credentials were filled)
-          const userInput = document.querySelector('#txtUserName, input[name="txtUserName"]');
-          const passInput = document.querySelector('#txtPassword, input[name="txtPassword"]');
-
-          return {
-            userFilled: userInput ? !!userInput.value : false,
-            passFilled: passInput ? !!passInput.value : false,
-            error: null
-          };
-        });
-
-        if (validationCheck.error) {
-          throw new Error(`Login validation failed: ${validationCheck.error}`);
         }
 
-        console.log('🔍 Form state check:', validationCheck);
-
-        // If no validation errors, credentials might be wrong (silent rejection)
-        if (validationCheck.userFilled && validationCheck.passFilled) {
-          throw new Error('Login form submitted but still on Login.aspx - likely invalid credentials or server rejected login');
-        }
-
-        // Wait for redirect away from Login.aspx
-        console.log('⏳ Waiting for redirect away from Login.aspx...');
-        await this.page.waitForFunction(() => !/Login\.aspx/i.test(location.href), { timeout: 45000 });
-        console.log('✅ Redirected successfully!');
+        throw new Error('Login failed: Page did not redirect from Login.aspx. Check Railway logs for session warnings or credential issues.');
       }
       // Ensure minimal profile object exists for automation script
       await this.page.evaluate(() => {
