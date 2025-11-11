@@ -412,30 +412,49 @@ app.post('/api/upload', (req, res, next) => {
         const s = String(val).trim().toLowerCase();
         return s === 'true' || s === 'yes' || s === 'y' || s === '1';
       };
+      // Upfront multiplier: 1,3,6,9,12
+      const allowedMultipliers = new Set(['1','3','6','9','12', 1,3,6,9,12]);
+      const upfrontMultiplierRaw = req.body.upfrontMultiplier;
+      const upfrontMultiplier =
+        upfrontMultiplierRaw !== undefined && upfrontMultiplierRaw !== null && allowedMultipliers.has(upfrontMultiplierRaw)
+          ? Number(upfrontMultiplierRaw)
+          : null;
 
-      const normalized = vehicleData.map((v) => ({
-        provider_name: providerName,
-        cap_code: v.cap_code ?? v.capCode ?? null,
-        manufacturer: v.manufacturer,
-        model: v.model,
-        variant: v.variant ?? null,
-        p11d_price: parseNumber(v.p11d_price ?? v.p11d),
-        fuel_type: v.fuel_type ?? v.fuelType ?? null,
-        mpg: parseNumber(v.mpg),
-        co2_emissions: parseNumber(v.co2_emissions ?? v.co2),
-        electric_range: parseNumber(v.electric_range),
-        insurance_group: parseNumber(v.insurance_group),
-        body_style: v.body_style ?? null,
-        transmission: v.transmission ?? null,
-        monthly_rental: parseNumber(v.monthly_rental),
-        upfront_payment: parseNumber(v.upfront_payment ?? v.upfront) || 0,
-        term_months: parseNumber(v.term_months ?? v.term) || 36,
-        annual_mileage: parseNumber(v.annual_mileage ?? v.mileage) || 10000,
-        maintenance_included: toBool(v.maintenance_included ?? v.maintenance),
-        admin_fee: parseNumber(v.admin_fee) || 0,
-        offer_valid_until: v.offer_valid_until ?? null,
-        special_conditions: v.special_conditions ?? null,
-      }));
+      const normalized = vehicleData.map((v) => {
+        const monthlyRental = parseNumber(v.monthly_rental);
+        let upfrontPayment = parseNumber(v.upfront_payment ?? v.upfront);
+        // If mapped upfront looks like months (1/3/6/9/12), convert to amount using monthly
+        if ((upfrontPayment === 1 || upfrontPayment === 3 || upfrontPayment === 6 || upfrontPayment === 9 || upfrontPayment === 12) && monthlyRental) {
+          upfrontPayment = monthlyRental * upfrontPayment;
+        }
+        // If no upfront mapped, use global multiplier if provided
+        if ((!upfrontPayment || upfrontPayment === 0) && upfrontMultiplier && monthlyRental) {
+          upfrontPayment = monthlyRental * upfrontMultiplier;
+        }
+        return {
+          provider_name: providerName,
+          cap_code: v.cap_code ?? v.capCode ?? null,
+          manufacturer: v.manufacturer,
+          model: v.model,
+          variant: v.variant ?? null,
+          p11d_price: parseNumber(v.p11d_price ?? v.p11d),
+          fuel_type: v.fuel_type ?? v.fuelType ?? null,
+          mpg: parseNumber(v.mpg),
+          co2_emissions: parseNumber(v.co2_emissions ?? v.co2),
+          electric_range: parseNumber(v.electric_range),
+          insurance_group: parseNumber(v.insurance_group),
+          body_style: v.body_style ?? null,
+          transmission: v.transmission ?? null,
+          monthly_rental: monthlyRental,
+          upfront_payment: upfrontPayment || 0,
+          term_months: parseNumber(v.term_months ?? v.term) || 36,
+          annual_mileage: parseNumber(v.annual_mileage ?? v.mileage) || 10000,
+          maintenance_included: toBool(v.maintenance_included ?? v.maintenance),
+          admin_fee: parseNumber(v.admin_fee) || 0,
+          offer_valid_until: v.offer_valid_until ?? null,
+          special_conditions: v.special_conditions ?? null,
+        }
+      });
 
       const validVehicles = normalized.filter((v) => v.manufacturer && v.model && v.monthly_rental);
       console.log('Upload parsing summary:', {

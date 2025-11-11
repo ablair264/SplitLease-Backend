@@ -368,15 +368,49 @@ class LeaseAnalysisDB {
   // ===================== MAPPINGS =====================
   async saveMapping(providerName, columnMappings, headerNames) {
     try {
+      // Validate and serialize columnMappings
+      let columnMappingsJson
+      if (typeof columnMappings === 'string') {
+        // Validate it's valid JSON
+        try {
+          JSON.parse(columnMappings)
+          columnMappingsJson = columnMappings
+        } catch (e) {
+          throw new Error(`Invalid JSON in columnMappings: ${e.message}`)
+        }
+      } else if (typeof columnMappings === 'object') {
+        columnMappingsJson = JSON.stringify(columnMappings || {})
+      } else {
+        columnMappingsJson = '{}'
+      }
+
+      // Validate and serialize headerNames
+      let headerNamesJson = null
+      if (headerNames !== null && headerNames !== undefined) {
+        if (typeof headerNames === 'string') {
+          // Validate it's valid JSON
+          try {
+            JSON.parse(headerNames)
+            headerNamesJson = headerNames
+          } catch (e) {
+            throw new Error(`Invalid JSON in headerNames: ${e.message}`)
+          }
+        } else if (Array.isArray(headerNames)) {
+          headerNamesJson = JSON.stringify(headerNames)
+        } else {
+          throw new Error(`headerNames must be an array or null, got ${typeof headerNames}`)
+        }
+      }
+
       const result = await this.query(
         `INSERT INTO provider_mappings (provider_name, column_mappings, header_names)
-           VALUES (lower($1), $2, $3)
+           VALUES (lower($1), $2::jsonb, $3::jsonb)
            ON CONFLICT (provider_name)
            DO UPDATE SET column_mappings = EXCLUDED.column_mappings,
                          header_names = EXCLUDED.header_names,
                          updated_at = CURRENT_TIMESTAMP
          RETURNING id, provider_name, column_mappings, header_names, updated_at`,
-        [providerName, columnMappings, headerNames || null]
+        [providerName, columnMappingsJson, headerNamesJson]
       )
       return { success: true, data: result.rows[0] }
     } catch (e) {
