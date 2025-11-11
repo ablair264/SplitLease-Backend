@@ -15,7 +15,7 @@
     "enrich:cap": "node src/enrichFromCAP.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.81.0",
