@@ -190,3 +190,140 @@ module.exports = {
   supabase,
   drivaliaJobsService: new DrivaliaJobsService()
 };
+
+/**
+ * Lex Jobs Service
+ * Handles interaction with lex_jobs and lex_quotes tables
+ */
+class LexJobsService {
+  async getJobs(limit = 50) {
+    const { data, error } = await supabase
+      .from('lex_jobs')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return data || [];
+  }
+
+  async getPendingJobs() {
+    const { data, error } = await supabase
+      .from('lex_jobs')
+      .select('*')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    return data || [];
+  }
+
+  async createJob(payload) {
+    const { vehicles = [], config = {} } = payload || {};
+    const { data, error } = await supabase
+      .from('lex_jobs')
+      .insert({
+        vehicles,
+        config,
+        vehicle_count: vehicles.length,
+        status: 'pending'
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  }
+
+  async getJob(jobId) {
+    const { data, error } = await supabase
+      .from('lex_jobs')
+      .select('*')
+      .eq('id', jobId)
+      .single();
+    if (error) throw error;
+    return data;
+  }
+
+  async updateJob(jobId, updates) {
+    const { data, error } = await supabase
+      .from('lex_jobs')
+      .update(updates)
+      .eq('id', jobId)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  }
+
+  async startProcessingJob(jobId) {
+    return this.updateJob(jobId, {
+      status: 'processing',
+      started_at: new Date().toISOString()
+    });
+  }
+
+  async completeJob(jobId, { successCount, failureCount, durationSeconds }) {
+    return this.updateJob(jobId, {
+      status: 'completed',
+      success_count: successCount,
+      failure_count: failureCount,
+      duration_seconds: durationSeconds,
+      completed_at: new Date().toISOString()
+    });
+  }
+
+  async failJob(jobId, errorDetails, failureCount = 0) {
+    return this.updateJob(jobId, {
+      status: 'failed',
+      error_details: errorDetails,
+      failure_count: failureCount,
+      completed_at: new Date().toISOString()
+    });
+  }
+
+  async insertQuotes(jobId, quotes) {
+    if (!quotes || quotes.length === 0) return [];
+    const rows = quotes.map((q) => ({
+      job_id: jobId,
+      vehicle_id: q.vehicle_id,
+      manufacturer: q.manufacturer,
+      model: q.model,
+      variant: q.variant,
+      term: q.term,
+      mileage: q.mileage,
+      monthly_rental: q.monthly_rental ?? null,
+      initial_rental: q.initial_rental ?? null,
+      total_cost: q.total_cost ?? null,
+      co2: q.co2 ?? null,
+      fuel_type: q.fuel_type ?? null,
+      p11d: q.p11d ?? null,
+      vat: q.vat ?? null,
+      maintenance: q.maintenance ?? false,
+      discount_type: q.discount_type ?? null,
+      discount_percent: q.discount_percent ?? null,
+      quote_id: q.quote_id ?? null,
+      lex_line_number: q.lex_line_number ?? null,
+      fetched_at: new Date().toISOString(),
+    }));
+    const { data, error } = await supabase
+      .from('lex_quotes')
+      .insert(rows)
+      .select();
+    if (error) throw error;
+    return data || [];
+  }
+
+  async getJobQuotes(jobId) {
+    const { data, error } = await supabase
+      .from('lex_quotes')
+      .select('*')
+      .eq('job_id', jobId)
+      .order('manufacturer', { ascending: true })
+      .order('model', { ascending: true })
+      .order('variant', { ascending: true })
+      .order('term', { ascending: true })
+      .order('mileage', { ascending: true });
+    if (error) throw error;
+    return data || [];
+  }
+}
+
+module.exports.lexJobsService = new LexJobsService();

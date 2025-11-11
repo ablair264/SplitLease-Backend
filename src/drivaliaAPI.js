@@ -11,32 +11,66 @@ class DrivaliaAPI {
 
   async login() {
     try {
+      // Step 1: Call actuator/info to establish session (required before login)
+      console.log('Drivalia API: Establishing session...');
+      const infoResponse = await fetch(`${this.baseURL}/actuator/info`);
+      const infoSetCookie = infoResponse.headers.get('set-cookie');
+      if (infoSetCookie) {
+        this.cookies = infoSetCookie;
+      }
+      console.log('Drivalia API: Session established');
+
+      // Step 2: Login with credentials
       console.log('Drivalia API: Logging in...');
+      console.log('Drivalia API: URL:', `${this.baseURL}/login`);
+      console.log('Drivalia API: Username:', this.username);
+
       const response = await fetch(`${this.baseURL}/login`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Cookie': this.cookies || '',
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Origin': 'https://www.caafgenus3.co.uk',
+          'Referer': 'https://www.caafgenus3.co.uk/WebApp/',
+          'Accept': 'application/json, text/plain, */*'
+        },
         body: new URLSearchParams({
           username: this.username,
           password: this.password
         })
       });
-      
-      // Store cookies for session
-      const setCookieHeader = response.headers.get('set-cookie');
-      if (setCookieHeader) {
-        this.cookies = setCookieHeader;
+
+      console.log('Drivalia API: Response status:', response.status);
+
+      // Check if response is HTML (error page)
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('text/html')) {
+        const html = await response.text();
+        console.error('Drivalia API: Received HTML instead of JSON');
+        console.error('First 500 chars:', html.substring(0, 500));
+        throw new Error('Login failed: API returned HTML error page. Check credentials or API endpoint.');
       }
-      
+
+      // Merge cookies from login response
+      const loginSetCookie = response.headers.get('set-cookie');
+      if (loginSetCookie) {
+        // Combine existing cookies with new ones
+        this.cookies = this.cookies
+          ? `${this.cookies}; ${loginSetCookie}`
+          : loginSetCookie;
+      }
+
       const data = await response.json();
       console.log('Drivalia API: Login response:', data);
-      
+
       // Get session data
       const session = await this.getSession();
       this.sessionData = session;
-      
+
       return { loginData: data, session };
     } catch (error) {
-      console.error('Drivalia API: Login failed:', error);
+      console.error('Drivalia API: Login failed:', error.message);
       throw error;
     }
   }

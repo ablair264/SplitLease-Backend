@@ -571,6 +571,44 @@ app.get('/api/drivalia/jobs/:id/download', async (req, res) => {
   }
 });
 
+// =============================================
+// LEX AUTOLEASE AUTOMATION
+// =============================================
+const { lexJobsService } = require('./supabase');
+
+app.get('/api/lex/jobs', async (req, res) => {
+  try {
+    const jobs = await lexJobsService.getJobs(100);
+    res.json({ success: true, data: jobs });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post('/api/lex/jobs', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    if (!Array.isArray(payload.vehicles) || payload.vehicles.length === 0) {
+      return res.status(400).json({ success: false, error: 'vehicles[] required' });
+    }
+    const job = await lexJobsService.createJob(payload);
+    res.json({ success: true, data: job });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.get('/api/lex/jobs/:id/results', async (req, res) => {
+  try {
+    const jobId = parseInt(req.params.id);
+    if (!jobId) return res.status(400).json({ success: false, error: 'Invalid job ID' });
+    const quotes = await lexJobsService.getJobQuotes(jobId);
+    res.json({ success: true, data: quotes });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 // Error handler
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err && err.stack ? err.stack : err)

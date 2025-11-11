@@ -7,9 +7,12 @@
   "scripts": {
     "start": "node src/server.js",
     "worker": "node src/drivaliaWorker.js",
+    "lex:worker": "node src/lexWorker.js",
     "dev": "node src/server.js",
     "dev:worker": "node src/drivaliaWorker.js",
-    "import:drivalia": "node src/importDrivaliaVehicles.js"
+    "import:drivalia": "node src/importDrivaliaVehicles.js",
+    "import:drivalia:json": "node src/importDrivaliaFromJSON.js",
+    "enrich:cap": "node src/enrichFromCAP.js"
   },
   "engines": {
     "node": ">=18"
@@ -23,6 +26,7 @@
     "multer": "^1.4.5-lts.1",
     "node-fetch": "^2.7.0",
     "pg": "^8.11.3",
+    "puppeteer": "^23.5.0",
     "xlsx": "^0.18.5"
   }
 }
