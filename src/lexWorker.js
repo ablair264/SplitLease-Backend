@@ -132,15 +132,26 @@ class LexWorker {
 
         console.log('🖱️  Clicking login button with Puppeteer...');
 
-        // Wait for navigation after clicking submit
-        await Promise.all([
-          this.page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 30000 }).catch(e => {
-            console.log('Navigation timeout or no navigation:', e.message);
-          }),
-          this.page.click(submitSelector)
-        ]);
+        // Click and wait for navigation with a race condition
+        const navigationPromise = this.page.waitForNavigation({
+          waitUntil: 'domcontentloaded',
+          timeout: 15000
+        }).catch(e => {
+          console.log('⚠️  Navigation wait ended:', e.message);
+          return null;
+        });
 
-        console.log('✓ Submit button clicked, checking result...');
+        await this.page.click(submitSelector);
+        console.log('✓ Submit button clicked');
+
+        // Wait up to 15 seconds for navigation
+        console.log('⏳ Waiting for navigation (15s timeout)...');
+        await navigationPromise;
+
+        // Wait an additional 2 seconds for any post-navigation JS
+        await new Promise(r => setTimeout(r, 2000));
+
+        console.log('✓ Navigation wait complete, checking result...');
 
       } catch (nativeError) {
         console.warn('Native form fill failed:', nativeError.message);
