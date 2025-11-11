@@ -52,6 +52,25 @@ class LexWorker {
   }
 
   async ensureLoggedIn() {
+    // Check if already logged in FIRST (before clearing anything)
+    console.log('🔍 Checking if already logged in...');
+    const currentUrl = this.page.url();
+    const isOnLoginPage = /Login\.aspx/i.test(currentUrl);
+
+    if (!isOnLoginPage) {
+      // Not on login page, check for logged-in indicators
+      const isLoggedIn = await this.page.evaluate(() => {
+        return !!(window && (window.profile || document.querySelector('#selManufacturers') || document.querySelector('#selModels')));
+      }).catch(() => false);
+
+      if (isLoggedIn) {
+        console.log('✅ Already logged in, skipping login process');
+        return;
+      }
+    }
+
+    console.log('🔐 Not logged in, starting login process...');
+
     // Clear cookies to avoid session conflicts
     console.log('🧹 Clearing cookies to start fresh session...');
     const client = await this.page.target().createCDPSession();
@@ -84,12 +103,6 @@ class LexWorker {
         if (btns[0]) btns[0].click();
       });
     } catch {}
-
-    // If already logged in, return
-    const isLoggedIn = await this.page.evaluate(() => {
-      return !!(window && (window.profile || document.querySelector('#selManufacturers') || document.querySelector('#selModels')));
-    }).catch(() => false);
-    if (isLoggedIn) return;
 
     const username = process.env.LEX_USERNAME;
     const password = process.env.LEX_PASSWORD;
