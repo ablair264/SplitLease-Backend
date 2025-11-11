@@ -80,7 +80,7 @@ class LexWorker {
     // Visit logout URL first to end any previous session
     console.log('🚪 Visiting logout URL to end any previous sessions...');
     try {
-      await this.page.goto(`${LEX_BASE_URL.replace(/\/$/, '')}/Logout.aspx`, {
+      await this.page.goto(`${LEX_BASE_URL.replace(/\/$/, '')}/Logoff.aspx`, {
         waitUntil: 'domcontentloaded',
         timeout: 10000
       }).catch(() => {});
