@@ -72,11 +72,11 @@ class DrivaliaHybridWorker {
       try {
         const sessionTest = await this.apiCall('/user/data/session', 'GET');
         if (sessionTest && sessionTest.userName) {
-          console.log('✅ Already logged in');
+          console.log('✅ Already logged in as:', sessionTest.userName);
           return;
         }
       } catch (e) {
-        // Session expired, need to re-login
+        console.log('⚠️  Session expired, re-logging in...');
         this.cookies = null;
       }
     }
@@ -116,13 +116,19 @@ class DrivaliaHybridWorker {
       .join('; ');
 
     // Test session
-    const session = await this.apiCall('/user/data/session', 'GET');
-    if (!session || !session.userName) {
-      throw new Error('Login failed - no valid session');
-    }
+    try {
+      const session = await this.apiCall('/user/data/session', 'GET');
+      if (!session || !session.userName) {
+        throw new Error('Login failed - no valid session');
+      }
 
-    this.sessionData = session;
-    console.log(`✅ Logged in as: ${session.userName}`);
+      this.sessionData = session;
+      console.log(`✅ Logged in as: ${session.userName}`);
+    } catch (e) {
+      console.error('❌ Session test failed:', e.message);
+      console.error('   Cookies:', this.cookies?.substring(0, 100) + '...');
+      throw new Error(`Login verification failed: ${e.message}`);
+    }
   }
 
   async apiCall(endpoint, method = 'GET', body = null) {
@@ -227,8 +233,8 @@ class DrivaliaHybridWorker {
     };
   }
 
-  async calculateQuote(vehicle, term, annualMileage, maintenance = false, deposit = 0) {
-    console.log(`💰 Calculating quote: ${term}m, ${annualMileage} miles`);
+  async calculateQuote(vehicle, term, annualMileage, maintenance = false, upfrontMonths = 1) {
+    console.log(`💰 Calculating quote: ${term}m, ${annualMileage} miles, ${upfrontMonths} months upfront`);
 
     const calculateBody = {
       customerType: "C",
@@ -266,13 +272,14 @@ class DrivaliaHybridWorker {
       calculation: {
         parameters: {
           term: term,
+          numberInAdvance: parseInt(upfrontMonths) || 1, // Number of months payment upfront
           assetMeterUsage: {
             type: "MI",
             multiplier: 1000,
             multiplicandMeterUsage: annualMileage / 1000,
             meterUsage: annualMileage
           },
-          initialCapitalReduction: deposit || 0,
+          initialCapitalReduction: 0, // Not used when using numberInAdvance
           maintenanceTerms: maintenance ? term : 0
         }
       }
@@ -329,8 +336,10 @@ class DrivaliaHybridWorker {
       let failureCount = 0;
       const allQuotes = [];
 
-      // Ensure logged in
+      // Ensure logged in before processing
+      console.log('🔐 Verifying session...');
       await this.ensureLoggedIn();
+      console.log('✅ Session verified, starting quote generation...');
 
       for (const vehicle of job.vehicles) {
         console.log(`   📍 Processing: ${vehicle.manufacturer} ${vehicle.model}`);
@@ -352,7 +361,7 @@ class DrivaliaHybridWorker {
                   term,
                   mileage,
                   config.maintenance || false,
-                  config.deposit || 0
+                  config.upfrontPayment || config.deposit || 1 // Support both old and new format
                 );
 
                 const quote = {
