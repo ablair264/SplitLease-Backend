@@ -1,7 +1,10 @@
 const fetch = require('node-fetch');
 
 class DrivaliaAPI {
-  constructor(username = 'Ally Blair', password = '9Mu@.5Qw2!XXtaF') {
+  constructor(
+    username = process.env.DRIVALIA_USERNAME || 'Ally Blair',
+    password = process.env.DRIVALIA_PASSWORD || '9Mu@.5Qw2!XXtaF'
+  ) {
     this.baseURL = 'https://www.caafgenus3.co.uk/WebApp/api';
     this.username = username;
     this.password = password;

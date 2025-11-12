@@ -9,8 +9,12 @@
 require('dotenv').config();
 const path = require('path');
 const fs = require('fs');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const { lexJobsService } = require('./supabase');
+
+// Use stealth plugin to avoid detection
+puppeteer.use(StealthPlugin());
 
 const POLL_INTERVAL = parseInt(process.env.JOB_POLL_INTERVAL_MS) || 7000;
 const MAX_CONCURRENT_JOBS = parseInt(process.env.MAX_CONCURRENT_JOBS) || 1;
@@ -26,20 +30,97 @@ class LexWorker {
 
   async initBrowser() {
     if (this.browser) return;
+
+    // Enhanced browser configuration for Railway and anti-bot evasion
     this.browser = await puppeteer.launch({
       headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-blink-features=AutomationControlled', // Hide automation
+        '--disable-features=IsolateOrigins,site-per-process',
+        '--window-size=1366,900',
+        '--start-maximized'
+      ],
+      ignoreDefaultArgs: ['--enable-automation'], // Don't show "Chrome is being controlled by automated software"
     });
+
     this.page = await this.browser.newPage();
-    await this.page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36');
-    await this.page.setViewport({ width: 1366, height: 900 });
-    await this.page.setExtraHTTPHeaders({ 'Accept-Language': 'en-GB,en;q=0.9' });
-    this.page.setDefaultTimeout(60000);
+
+    // Set realistic user agent
+    await this.page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+    );
+
+    // Set realistic viewport
+    await this.page.setViewport({
+      width: 1366,
+      height: 900,
+      deviceScaleFactor: 1,
+      hasTouch: false,
+      isLandscape: true,
+      isMobile: false
+    });
+
+    // Set realistic headers
+    await this.page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-GB,en;q=0.9',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Connection': 'keep-alive',
+      'Upgrade-Insecure-Requests': '1'
+    });
+
+    // Hide webdriver property and add realistic Chrome properties
+    await this.page.evaluateOnNewDocument(() => {
+      // Hide webdriver
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => undefined,
+      });
+
+      // Add Chrome runtime
+      window.chrome = {
+        runtime: {},
+        loadTimes: function() {},
+        csi: function() {},
+        app: {}
+      };
+
+      // Override plugins to make it look real
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => [
+          {
+            0: {type: "application/x-google-chrome-pdf", suffixes: "pdf", description: "Portable Document Format"},
+            description: "Portable Document Format",
+            filename: "internal-pdf-viewer",
+            length: 1,
+            name: "Chrome PDF Plugin"
+          }
+        ],
+      });
+
+      // Override languages
+      Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-GB', 'en', 'en-US'],
+      });
+
+      // Add realistic permissions
+      const originalQuery = window.navigator.permissions.query;
+      window.navigator.permissions.query = (parameters) => (
+        parameters.name === 'notifications' ?
+          Promise.resolve({ state: Notification.permission }) :
+          originalQuery(parameters)
+      );
+    });
+
+    // Increased timeout for Railway's network latency
+    this.page.setDefaultTimeout(90000); // 90 seconds instead of 60
   }
 
   async ensureLoggedIn() {
     // Always start from the explicit login URL
-    await this.page.goto(LEX_LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await this.page.goto(LEX_LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 90000 });
 
     // Quick cookie banner dismissal (best-effort)
     try {
@@ -127,14 +208,14 @@ class LexWorker {
         }
       }, { username, password });
 
-      // Wait for redirect away from Login.aspx
-      await this.page.waitForFunction(() => !/Login\.aspx/i.test(location.href), { timeout: 45000 });
+      // Wait for redirect away from Login.aspx (increased timeout for Railway)
+      await this.page.waitForFunction(() => !/Login\.aspx/i.test(location.href), { timeout: 60000 });
       // Then wait for a sign of authenticated session
       await this.page.waitForFunction(() => {
         return !!(window && (window.profile)) ||
                document.querySelector('#selManufacturers') ||
                document.querySelector('#selModels');
-      }, { timeout: 45000 });
+      }, { timeout: 60000 });
     } catch (e) {
       // Dump a quick HTML snapshot to help diagnose (truncated)
       try {

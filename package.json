@@ -7,12 +7,18 @@
   "scripts": {
     "start": "node src/server.js",
     "worker": "node src/drivaliaWorker.js",
+    "worker:browser": "node src/drivaliaBrowserWorker.js",
+    "worker:hybrid": "node src/drivaliaHybridWorker.js",
     "lex:worker": "node src/lexWorker.js",
     "dev": "node src/server.js",
     "dev:worker": "node src/drivaliaWorker.js",
+    "dev:worker:browser": "node src/drivaliaBrowserWorker.js",
     "import:drivalia": "node src/importDrivaliaVehicles.js",
     "import:drivalia:json": "node src/importDrivaliaFromJSON.js",
-    "enrich:cap": "node src/enrichFromCAP.js"
+    "enrich:cap": "node src/enrichFromCAP.js",
+    "diagnose": "node diagnose-railway.js",
+    "test:drivalia": "node test-drivalia-credentials.js",
+    "record:drivalia": "node record-drivalia-flow.js"
   },
   "engines": {
     "node": ">=20"
@@ -27,6 +33,8 @@
     "node-fetch": "^2.7.0",
     "pg": "^8.11.3",
     "puppeteer": "^23.5.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "xlsx": "^0.18.5"
   }
 }

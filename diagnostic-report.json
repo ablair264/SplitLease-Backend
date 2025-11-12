@@ -1,0 +1,56 @@
+{
+  "timestamp": "2025-11-12T15:05:16.547Z",
+  "environment": {
+    "required": {
+      "SUPABASE_URL": true,
+      "SUPABASE_SERVICE_KEY": true,
+      "LEX_USERNAME": true,
+      "LEX_PASSWORD": true
+    },
+    "optional": {
+      "LEX_BASE_URL": false,
+      "LEX_LOGIN_URL": false,
+      "JOB_POLL_INTERVAL_MS": true,
+      "MAX_CONCURRENT_JOBS": true
+    },
+    "allRequiredPresent": true
+  },
+  "lex": {
+    "navigation": {
+      "url": "https://associate.lexautolease.co.uk/Login.aspx",
+      "title": "Login",
+      "duration": 3262,
+      "screenshot": "/Users/alastairblair/Development/SplitWheel/Lease Analysis/lease-analyzer-backend/diagnostic-screenshots/lex-login-page.png"
+    },
+    "formFound": true,
+    "formInfo": {
+      "found": true,
+      "hasUserField": true,
+      "hasPassField": true,
+      "hasSubmitBtn": true,
+      "userFieldId": "txtUserName",
+      "passFieldId": "txtPassword",
+      "submitBtnId": "btnLogon"
+    },
+    "error": "Protocol error (Page.captureScreenshot): Cannot take screenshot with 0 width.",
+    "errorStack": "ProtocolError: Protocol error (Page.captureScreenshot): Cannot take screenshot with 0 width.\n    at <instance_members_initializer> (/Users/alastairblair/Development/SplitWheel/Lease Analysis/lease-analyzer-backend/node_modules/puppeteer-core/lib/cjs/puppeteer/common/CallbackRegistry.js:101:14)\n    at new Callback (/Users/alastairblair/Development/SplitWheel/Lease Analysis/lease-analyzer-backend/node_modules/puppeteer-core/lib/cjs/puppeteer/common/CallbackRegistry.js:105:16)\n    at CallbackRegistry.create (/Users/alastairblair/Development/SplitWheel/Lease Analysis/lease-analyzer-backend/node_modules/puppeteer-core/lib/cjs/puppeteer/common/CallbackRegistry.js:23:26)\n    at Connection._rawSend (/Users/alastairblair/Development/SplitWheel/Lease Analysis/lease-analyzer-backend/node_modules/puppeteer-core/lib/cjs/puppeteer/cdp/Connection.js:93:26)\n    at CdpCDPSession.send (/Users/alastairblair/Development/SplitWheel/Lease Analysis/lease-analyzer-backend/node_modules/puppeteer-core/lib/cjs/puppeteer/cdp/CDPSession.js:68:33)\n    at CdpPage._screenshot (/Users/alastairblair/Development/SplitWheel/Lease Analysis/lease-analyzer-backend/node_modules/puppeteer-core/lib/cjs/puppeteer/cdp/Page.js:768:62)\n    at CdpPage.screenshot (/Users/alastairblair/Development/SplitWheel/Lease Analysis/lease-analyzer-backend/node_modules/puppeteer-core/lib/cjs/puppeteer/api/Page.js:1066:41)\n    at async CdpPage.<anonymous> (/Users/alastairblair/Development/SplitWheel/Lease Analysis/lease-analyzer-backend/node_modules/puppeteer-core/lib/cjs/puppeteer/util/decorators.js:172:24)\n    at async testLexLogin (/Users/alastairblair/Development/SplitWheel/Lease Analysis/lease-analyzer-backend/diagnose-railway.js:434:7)\n    at async main (/Users/alastairblair/Development/SplitWheel/Lease Analysis/lease-analyzer-backend/diagnose-railway.js:592:5)"
+  },
+  "drivalia": {
+    "credentialsSource": "hardcoded",
+    "username": "Ally Blair",
+    "loginSuccess": false,
+    "error": "Login failed: API returned HTML error page. Check credentials or API endpoint.",
+    "errorStack": "Error: Login failed: API returned HTML error page. Check credentials or API endpoint.\n    at DrivaliaAPI.login (/Users/alastairblair/Development/SplitWheel/Lease Analysis/lease-analyzer-backend/src/drivaliaAPI.js:52:15)\n    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)\n    at async testDrivaliaAuth (/Users/alastairblair/Development/SplitWheel/Lease Analysis/lease-analyzer-backend/diagnose-railway.js:141:20)\n    at async main (/Users/alastairblair/Development/SplitWheel/Lease Analysis/lease-analyzer-backend/diagnose-railway.js:591:5)"
+  },
+  "summary": {
+    "issues": [
+      "❌ Drivalia API authentication failing",
+      "❌ Lex login failing"
+    ],
+    "recommendations": [
+      "Update hardcoded credentials in src/drivaliaAPI.js (lines 4-7)",
+      "OR add DRIVALIA_USERNAME and DRIVALIA_PASSWORD environment variables and update the code to use them"
+    ],
+    "overallStatus": "FAIL"
+  }
+}
