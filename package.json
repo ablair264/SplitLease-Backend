@@ -9,6 +9,7 @@
     "worker": "node src/drivaliaWorker.js",
     "worker:browser": "node src/drivaliaBrowserWorker.js",
     "worker:hybrid": "node src/drivaliaHybridWorker.js",
+    "worker:simple": "node src/drivaliaSimpleBrowserWorker.js",
     "lex:worker": "node src/lexWorker.js",
     "dev": "node src/server.js",
     "dev:worker": "node src/drivaliaWorker.js",

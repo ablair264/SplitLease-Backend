@@ -195,6 +195,220 @@ app.get('/api/dashboard/top-offers', async (req, res) => {
 })
 
 // =============================================
+// EMPLOYEE SAVINGS PORTAL
+// =============================================
+/**
+ * Calculate salary sacrifice savings
+ * @param {number} annualSalary - Annual salary in pounds
+ * @param {string} taxRegion - 'ewni' (England, Wales, N. Ireland) or 'scotland'
+ * @param {number} monthlyLease - Monthly lease payment before tax savings
+ * @param {number} otherMonthlySacrifices - Other monthly salary sacrifices
+ * @returns {object} Savings breakdown
+ */
+function calculateSalarySacrificeSavings(annualSalary, taxRegion, monthlyLease, otherMonthlySacrifices = 0) {
+  // UK Tax bands for 2024/2025
+  const TAX_BANDS = {
+    ewni: {
+      personalAllowance: 12570,
+      basicRate: { threshold: 50270, rate: 0.20 },
+      higherRate: { threshold: 125140, rate: 0.40 },
+      additionalRate: { rate: 0.45 }
+    },
+    scotland: {
+      personalAllowance: 12570,
+      starterRate: { threshold: 14732, rate: 0.19 },
+      basicRate: { threshold: 25688, rate: 0.20 },
+      intermediateRate: { threshold: 43662, rate: 0.21 },
+      higherRate: { threshold: 125140, rate: 0.42 },
+      topRate: { rate: 0.45 }
+    }
+  };
+
+  const annualLease = monthlyLease * 12;
+  const totalAnnualSacrifice = annualLease + (otherMonthlySacrifices * 12);
+  const newTaxableIncome = annualSalary - totalAnnualSacrifice;
+
+  // Calculate tax savings
+  let taxSaving = 0;
+  let niSaving = 0;
+
+  if (taxRegion === 'ewni') {
+    const bands = TAX_BANDS.ewni;
+    // Calculate tax on original salary
+    let originalTax = 0;
+    let taxable = Math.max(0, annualSalary - bands.personalAllowance);
+    if (taxable > 0) {
+      if (taxable <= bands.basicRate.threshold) {
+        originalTax = taxable * bands.basicRate.rate;
+      } else if (taxable <= bands.higherRate.threshold) {
+        originalTax = bands.basicRate.threshold * bands.basicRate.rate;
+        originalTax += (taxable - bands.basicRate.threshold) * bands.higherRate.rate;
+      } else {
+        originalTax = bands.basicRate.threshold * bands.basicRate.rate;
+        originalTax += (bands.higherRate.threshold - bands.basicRate.threshold) * bands.higherRate.rate;
+        originalTax += (taxable - bands.higherRate.threshold) * bands.additionalRate.rate;
+      }
+    }
+
+    // Calculate tax on new salary
+    let newTax = 0;
+    taxable = Math.max(0, newTaxableIncome - bands.personalAllowance);
+    if (taxable > 0) {
+      if (taxable <= bands.basicRate.threshold) {
+        newTax = taxable * bands.basicRate.rate;
+      } else if (taxable <= bands.higherRate.threshold) {
+        newTax = bands.basicRate.threshold * bands.basicRate.rate;
+        newTax += (taxable - bands.basicRate.threshold) * bands.higherRate.rate;
+      } else {
+        newTax = bands.basicRate.threshold * bands.basicRate.rate;
+        newTax += (bands.higherRate.threshold - bands.basicRate.threshold) * bands.higherRate.rate;
+        newTax += (taxable - bands.higherRate.threshold) * bands.additionalRate.rate;
+      }
+    }
+
+    taxSaving = originalTax - newTax;
+  } else {
+    // Scotland - simplified calculation
+    const bands = TAX_BANDS.scotland;
+    // Simplified: use average rate approximation
+    let avgRate = 0.20; // Default to basic rate
+    if (annualSalary > bands.higherRate.threshold) {
+      avgRate = 0.42;
+    } else if (annualSalary > bands.intermediateRate.threshold) {
+      avgRate = 0.21;
+    }
+    taxSaving = totalAnnualSacrifice * avgRate;
+  }
+
+  // National Insurance savings (12% on earnings between £12,570 and £50,270, 2% above)
+  const niLowerThreshold = 12570;
+  const niUpperThreshold = 50270;
+  const niLowerRate = 0.12;
+  const niUpperRate = 0.02;
+
+  // Original NI
+  let originalNI = 0;
+  const originalNIable = Math.max(0, annualSalary - niLowerThreshold);
+  if (originalNIable > 0) {
+    if (originalNIable <= niUpperThreshold) {
+      originalNI = originalNIable * niLowerRate;
+    } else {
+      originalNI = niUpperThreshold * niLowerRate;
+      originalNI += (originalNIable - niUpperThreshold) * niUpperRate;
+    }
+  }
+
+  // New NI
+  let newNI = 0;
+  const newNIable = Math.max(0, newTaxableIncome - niLowerThreshold);
+  if (newNIable > 0) {
+    if (newNIable <= niUpperThreshold) {
+      newNI = newNIable * niLowerRate;
+    } else {
+      newNI = niUpperThreshold * niLowerRate;
+      newNI += (newNIable - niUpperThreshold) * niUpperRate;
+    }
+  }
+
+  niSaving = originalNI - newNI;
+
+  const totalAnnualSaving = taxSaving + niSaving;
+  const monthlySaving = totalAnnualSaving / 12;
+  const netMonthlyCost = monthlyLease - monthlySaving;
+
+  return {
+    monthlyLease,
+    monthlySaving: Math.max(0, monthlySaving),
+    netMonthlyCost: Math.max(0, netMonthlyCost),
+    annualSaving: totalAnnualSaving,
+    taxSaving,
+    niSaving,
+    savingsPercentage: annualSalary > 0 ? (totalAnnualSaving / annualLease) * 100 : 0
+  };
+}
+
+app.post('/api/employee-savings/calculate', async (req, res) => {
+  try {
+    const { salary, taxRegion, postcode, deductions, maxMonthly, limit = 20 } = req.body;
+
+    if (!salary || !taxRegion) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Salary and tax region are required' 
+      });
+    }
+
+    const annualSalary = parseFloat(salary);
+    const otherMonthlySacrifices = parseFloat(deductions) || 0;
+    const maxMonthlyFilter = maxMonthly ? parseFloat(maxMonthly) : null;
+
+    // Fetch best deals from database
+    const filters = {
+      maxMonthly: maxMonthlyFilter,
+      limit: parseInt(limit) || 20,
+      offset: 0
+    };
+
+    const dealsResult = await leaseDB.getBestDeals(filters);
+    if (!dealsResult.success) {
+      return res.status(500).json(dealsResult);
+    }
+
+    // Calculate savings for each vehicle
+    const vehiclesWithSavings = dealsResult.data.map(deal => {
+      const monthlyLease = parseFloat(deal.best_monthly_rental) || 0;
+      const savings = calculateSalarySacrificeSavings(
+        annualSalary,
+        taxRegion,
+        monthlyLease,
+        otherMonthlySacrifices
+      );
+
+      return {
+        vehicle_id: deal.vehicle_id,
+        manufacturer: deal.manufacturer,
+        model: deal.model,
+        variant: deal.variant,
+        cap_code: deal.cap_code,
+        p11d_price: deal.p11d_price,
+        fuel_type: deal.fuel_type,
+        co2_emissions: deal.co2_emissions,
+        mpg: deal.mpg,
+        body_style: deal.body_style,
+        best_monthly_rental: monthlyLease,
+        best_upfront_payment: deal.best_upfront_payment || 0,
+        best_term_months: deal.best_term_months,
+        best_annual_mileage: deal.best_annual_mileage,
+        best_provider_name: deal.best_provider_name,
+        best_deal_score: deal.best_deal_score,
+        // Savings calculations
+        net_monthly_cost: savings.netMonthlyCost,
+        monthly_saving: savings.monthlySaving,
+        annual_saving: savings.annualSaving,
+        savings_percentage: savings.savingsPercentage
+      };
+    });
+
+    // Sort by net monthly cost (best deals first)
+    vehiclesWithSavings.sort((a, b) => a.net_monthly_cost - b.net_monthly_cost);
+
+    res.json({
+      success: true,
+      data: vehiclesWithSavings,
+      count: vehiclesWithSavings.length,
+      calculation: {
+        annualSalary,
+        taxRegion,
+        otherMonthlySacrifices
+      }
+    });
+  } catch (error) {
+    console.error('Error calculating employee savings:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// =============================================
 // SALARY SACRIFICE
 // =============================================
 app.get('/api/ss/customers', async (req, res) => {
